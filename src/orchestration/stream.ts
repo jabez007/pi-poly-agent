@@ -1,3 +1,4 @@
+import { safeFailure } from "./errors.ts";
 import {
 	createAssistantMessageEventStream,
 	type AssistantMessage,
@@ -23,9 +24,9 @@ function protectedStream(
 					output.push({ type: "start", partial: event.message });
 					output.push(event);
 				}
-				if (event.type === "error") throw new Error("Provider error");
+				if (event.type === "error") throw safeFailure(event.error.errorMessage);
 			}
-		} catch {
+		} catch (failure) {
 			const error: AssistantMessage = {
 				role: "assistant",
 				content: [],
@@ -34,7 +35,7 @@ function protectedStream(
 				model: model.id,
 				timestamp: Date.now(),
 				stopReason: "error",
-				errorMessage: "Worker provider failed; details withheld, no fallback or replay attempted",
+				errorMessage: safeFailure(failure).message,
 				usage: {
 					input: 0,
 					output: 0,

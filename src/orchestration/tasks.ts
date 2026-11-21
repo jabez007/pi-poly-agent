@@ -1,20 +1,26 @@
+import { atomicRecord, acquireHost } from "./storage.ts";
+import { safeFailure, type FailureCode } from "./errors.ts";
+import { providerCapabilities, type Capabilities } from "./capabilities.ts";
+import { worktreeReadiness, type Prerequisite } from "./preparation.ts";
 import { untilCanceled } from "./cancellation.ts";
 import { randomUUID } from "node:crypto";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	readdirSync,
-	renameSync,
-	writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { assertEnvironment, type Policy } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
 import { assertSafeProfile } from "../profile.ts";
 import { assertDelegation } from "./capabilities.ts";
 import type { Role } from "./roles.ts";
-import { createWorkspace, workspaceDiff, snapshotWorkspace, type Workspace } from "./worktrees.ts";
+import {
+	createWorkspace,
+	workspaceDiff,
+	snapshotWorkspace,
+	inspectWorkspace,
+	integrateWorkspace,
+	assertIntegration,
+	git,
+	type Workspace,
+} from "./worktrees.ts";
 
 export type TaskStatus =
 	| "running"
@@ -22,7 +28,8 @@ export type TaskStatus =
 	| "failed"
 	| "canceled"
 	| "timed_out"
-	| "interrupted";
+	| "interrupted"
+	| "created";
 export interface Finding {
 	text: string;
 	source: string;
@@ -54,11 +61,31 @@ export interface Task {
 	reviewOf?: string;
 	reviewBase?: string;
 	progress: string;
+	project?: string;
+	createdAt?: string;
+	updatedAt?: string;
+	capabilities?: Capabilities;
+	sessionFile?: string;
+	prerequisites?: Prerequisite[];
+	preparation?: { command: string; exitCode: number }[];
+	failureCode?: FailureCode;
+	workflowReviewModel?: string;
+	replacementOf?: string;
+	replacedBy?: string;
+	reviewRevision?: string;
+	integration?: {
+		state: "awaiting_review" | "ready" | "integrating" | "integrated" | "interrupted" | "created";
+		revision: string;
+		parentBefore?: string;
+		parentAfter?: string;
+	};
+	recovery?: string[];
 }
 export interface RunInput {
 	task: Task;
 	signal: AbortSignal;
 	progress(text: string): void;
+	session?(file: string): void;
 }
 export type TaskRunner = (input: RunInput) => Promise<TaskResult>;
 export interface Dispatch {
@@ -70,6 +97,8 @@ export interface Dispatch {
 	context?: string;
 	depth?: number;
 	reviewOf?: string;
+	workflowReviewModel?: string;
+	replacementOf?: string;
 }
 
 export function validateTaskResult(value: unknown): TaskResult {
@@ -103,6 +132,9 @@ export function validateTaskResult(value: unknown): TaskResult {
 }
 
 export class TaskManager {
+	readonly diagnostics: string[] = [];
+	private release: () => void;
+	private closed = false;
 	private tasks = new Map<string, Task>();
 	private active = new Map<string, { controller: AbortController; done: Promise<void> }>();
 	constructor(
@@ -113,36 +145,68 @@ export class TaskManager {
 		private concurrency = 2,
 		private timeoutMs = 900000,
 		private changed: (task: Task) => void = () => {},
+		private prepare: (task: Task, signal: AbortSignal) => Promise<void> = async () => {},
 	) {
 		assertSafeProfile(directory);
 		if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4)
 			throw new Error("Invalid task concurrency");
 		mkdirSync(directory, { recursive: true, mode: 0o700 });
-		this.restore();
+		this.release = acquireHost(directory);
+		try {
+			this.restore();
+		} catch (error) {
+			this.release();
+			throw error;
+		}
 	}
 	private restore(): void {
 		for (const id of readdirSync(this.directory).filter((id) => /^[a-f0-9-]{36}$/.test(id))) {
 			const file = join(this.directory, id, "task.json");
-			if (!existsSync(file)) continue;
-			assertSafeProfile(file);
+			if (!existsSync(file)) {
+				this.diagnostics.push(
+					`Task ${id}: missing committed record. Preserved temporary files or worktree require manual inspection.`,
+				);
+				continue;
+			}
 			try {
-				const task = JSON.parse(readFileSync(file, "utf8")) as Task;
-				if (task.id !== id || !task.workspace || task.depth !== 1) continue;
-				assertNoSecrets(task);
-				if (task.status === "running") {
-					task.status = "interrupted";
-					task.error =
-						"Pi restarted; execution was not replayed. Inspect the preserved worktree and handoff.";
-				}
-				this.tasks.set(id, task);
-				this.persist(task, false);
+				this.restoreTask(id, file);
 			} catch {
-				/* A damaged record must not prevent independent tasks. */
+				this.diagnostics.push(
+					`Task ${id}: damaged, unsafe, or unreadable record. Original files retained for manual recovery.`,
+				);
 			}
 		}
 	}
+	private restoreTask(id: string, file: string): void {
+		assertSafeProfile(file);
+		const task = JSON.parse(readFileSync(file, "utf8")) as Task;
+		if (task.id !== id || !task.workspace || task.depth !== 1) throw new Error("Invalid task");
+		if (
+			task.workspace.root !== git(this.cwd, ["rev-parse", "--show-toplevel"]) ||
+			task.workspace.path !== resolve(this.directory, id, "worktree")
+		)
+			throw new Error("Task belongs to another project or path");
+		assertSafeProfile(task.workspace.path);
+		assertNoSecrets(task);
+		if (["running", "created"].includes(task.status)) {
+			task.status = "interrupted";
+			task.error =
+				"Pi restarted; execution was not replayed. Inspect the preserved worktree and handoff.";
+		}
+		task.recovery = inspectWorkspace(task.workspace);
+		if (task.integration?.state === "integrating") {
+			task.integration.state = "interrupted";
+			task.recovery.push(
+				"Integration was interrupted. Inspect parent Git status and CHERRY_PICK_HEAD; no cherry-pick was replayed.",
+			);
+		}
+		this.tasks.set(id, task);
+		this.persist(task, false);
+	}
 	list(): Task[] {
-		return [...this.tasks.values()].map((task) => structuredClone(task));
+		return [...this.tasks.values()]
+			.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.id.localeCompare(b.id))
+			.map((task) => structuredClone(task));
 	}
 	get(id: string): Task {
 		const task = this.tasks.get(id);
@@ -152,9 +216,8 @@ export class TaskManager {
 	private persist(task: Task, notify = true): void {
 		const path = join(this.directory, task.id, "task.json");
 		assertSafeProfile(path);
-		const temporary = `${path}.${randomUUID()}.tmp`;
-		writeFileSync(temporary, JSON.stringify(task, null, 2), { mode: 0o600, flag: "wx" });
-		renameSync(temporary, path);
+		task.updatedAt = new Date().toISOString();
+		atomicRecord(path, task);
 		if (notify) {
 			try {
 				this.changed(structuredClone(task));
@@ -164,38 +227,92 @@ export class TaskManager {
 		}
 	}
 	dispatch(input: Dispatch): Task {
+		if (this.closed) throw new Error("Task host is closed");
 		assertEnvironment(process.env);
 		assertDelegation(input.provider, this.policy(), input.depth ?? 1);
 		if (this.active.size >= this.concurrency) throw new Error("Task concurrency limit reached");
 		validateDispatch(input);
 		const review = this.reviewTarget(input);
-		const id = randomUUID();
-		const workspace = createWorkspace(this.cwd, this.directory, id, review?.revision);
-		const task: Task = {
-			...input,
-			context: input.context || "",
-			id,
-			depth: 1,
-			status: "running",
-			workspace,
-			reviewBase: review?.workspace.base,
-			startedAt: new Date().toISOString(),
-			progress: "Starting isolated Pi session",
-		};
+		const task = this.createTask(input, review);
+		const id = task.id;
 		const controller = new AbortController();
-		this.tasks.set(id, task);
+		task.status = "running";
 		this.persist(task);
 		// Install the active slot before async execution can finish or dispatch another task.
 		const slot = { controller, done: Promise.resolve() };
 		this.active.set(id, slot);
-		slot.done = this.execute(task, controller);
+		slot.done = this.execute(task, controller).catch(() => {
+			this.diagnostics.push(
+				`Task ${task.id}: persistence failed. Stop this host and inspect preserved files; do not replay automatically.`,
+			);
+		});
 		return structuredClone(task);
+	}
+	private createTask(input: Dispatch, review?: Task): Task {
+		const id = randomUUID();
+		const replacement = input.replacementOf
+			? this.replacementTarget(input.replacementOf)
+			: undefined;
+		if (replacement && replacement.role.name !== input.role.name)
+			throw new Error("Replacement must preserve the original role");
+		const recoveryRevision = replacementRevision(replacement);
+		let task: Task | undefined;
+		try {
+			const workspace = createWorkspace(
+				this.cwd,
+				this.directory,
+				id,
+				review?.revision || recoveryRevision,
+				(planned) => {
+					if (replacement) planned.base = replacement.workspace.base;
+					task = {
+						...input,
+						context: input.context || "",
+						id,
+						depth: 1,
+						status: "created",
+						workspace: planned,
+						reviewBase: review?.workspace.base,
+						reviewRevision: review?.revision,
+						project: planned.root,
+						createdAt: new Date().toISOString(),
+						startedAt: new Date().toISOString(),
+						capabilities: providerCapabilities(input.provider, this.policy()),
+						progress: "Preparing isolated Pi session",
+					};
+					this.tasks.set(id, task);
+					this.persist(task, false);
+				},
+			);
+			if (replacement) workspace.base = replacement.workspace.base;
+			task!.workspace = workspace;
+			task!.prerequisites = worktreeReadiness(workspace.path);
+			if (replacement) {
+				const original = this.tasks.get(replacement.id)!;
+				original.replacedBy = id;
+				this.persist(original, false);
+			}
+			return task!;
+		} catch (error) {
+			if (task) {
+				task.status = "failed";
+				task.error = safeFailure(error).message;
+				this.persist(task, false);
+			}
+			throw error;
+		}
 	}
 	private reviewTarget(input: Dispatch): Task | undefined {
 		if (!input.reviewOf) return;
 		const review = this.get(input.reviewOf);
-		if (review.status !== "completed" || !review.revision || input.role.editing)
-			throw new Error("Review requires a completed snapshot and a read-only role");
+		if (
+			review.status !== "completed" ||
+			!review.revision ||
+			input.role.name !== "reviewer" ||
+			input.role.editing
+		)
+			throw new Error("Review requires a completed snapshot and the read-only reviewer role");
+		assertIntegrationSnapshot(review);
 		return review;
 	}
 	private async execute(task: Task, controller: AbortController): Promise<void> {
@@ -205,12 +322,28 @@ export class TaskManager {
 		}, this.timeoutMs);
 		try {
 			assertDelegation(task.provider, this.policy(), task.depth);
+			await untilCanceled(
+				this.prepare(structuredClone(task), controller.signal),
+				controller.signal,
+			);
+			if (controller.signal.aborted) return;
+			task.prerequisites = worktreeReadiness(task.workspace.path);
+			this.persist(task, false);
 			const result = await untilCanceled(
 				this.runner({
 					task: structuredClone(task),
 					signal: controller.signal,
+					session: (file) => {
+						if (controller.signal.aborted) return;
+						assertSafeProfile(file);
+						if (!file.startsWith(join(this.directory, task.id, "sessions") + "/"))
+							throw new Error("Invalid worker session reference");
+						task.sessionFile = file;
+						this.persist(task, false);
+					},
 					progress: (text) => {
 						try {
+							if (controller.signal.aborted) return;
 							assertNoSecrets(text);
 							task.progress = text.slice(0, 1000);
 							this.changed(structuredClone(task));
@@ -223,6 +356,7 @@ export class TaskManager {
 			);
 			if (controller.signal.aborted) return;
 			task.result = validateTaskResult(result);
+			this.persist(task, false);
 			const changes = workspaceDiff(task.workspace);
 			assertNoSecrets(changes);
 			if (!task.role.editing && changes.files.length)
@@ -230,11 +364,18 @@ export class TaskManager {
 			task.result.files = changes.files;
 			if (task.role.editing) task.revision = snapshotWorkspace(task.workspace);
 			task.status = "completed";
-		} catch {
+			if (task.revision) task.integration = { state: "awaiting_review", revision: task.revision };
+			if (task.reviewOf) {
+				const builder = this.tasks.get(task.reviewOf)!;
+				builder.integration = { state: "ready", revision: task.reviewRevision! };
+				this.persist(builder, false);
+			}
+		} catch (error) {
 			if (!controller.signal.aborted) {
 				task.status = "failed";
-				task.error =
-					"Worker failed or returned invalid/sensitive output; inspect the preserved worktree. No provider fallback attempted.";
+				const failure = safeFailure(error);
+				task.error = failure.message;
+				task.failureCode = failure.code;
 			}
 		} finally {
 			clearTimeout(timer);
@@ -260,14 +401,95 @@ export class TaskManager {
 		return this.get(id);
 	}
 	async close(): Promise<void> {
-		await Promise.all([...this.active.keys()].map((id) => this.cancel(id)));
+		this.closed = true;
+		try {
+			await Promise.all([...this.active.keys()].map((id) => this.cancel(id)));
+		} finally {
+			this.release();
+		}
+	}
+	recordPreparation(id: string, command: string, exitCode: number): void {
+		const task = this.tasks.get(id);
+		if (!task || task.status === "running")
+			throw new Error("Preparation requires an inactive task");
+		assertNoSecrets(command);
+		task.preparation = [...(task.preparation || []), { command, exitCode }];
+		task.prerequisites = worktreeReadiness(task.workspace.path);
+		this.persist(task, false);
+	}
+	private replacementTarget(id: string): Task {
+		const previous = this.get(id);
+		if (["running", "completed"].includes(previous.status) || previous.replacedBy)
+			throw new Error(
+				"Only an inactive failed, canceled, timed-out or interrupted task without a replacement can be replaced",
+			);
+		if (!existsSync(previous.workspace.path))
+			throw new Error("Original worktree is missing; inspect its retained branch manually");
+		if (git(previous.workspace.root, ["rev-parse", "HEAD"]) !== previous.workspace.base)
+			throw new Error("Parent changed; recover the original task branch manually");
+		assertNoSecrets(workspaceDiff(previous.workspace));
+		return previous;
+	}
+	integrate(id: string): Task {
+		const task = this.tasks.get(id);
+		if (!task || task.status !== "completed" || !task.role.editing || !task.revision)
+			throw new Error("Only completed builder snapshots can be integrated");
+		if (task.integration?.state === "integrated") throw new Error("Task is already integrated");
+		const review = this.list().find(
+			(r) =>
+				r.reviewOf === id &&
+				r.status === "completed" &&
+				r.role.name === "reviewer" &&
+				!r.role.editing &&
+				(r.reviewRevision || r.workspace.base) === task.revision,
+		);
+		if (!review)
+			throw new Error("Complete an independent review of the exact snapshot before integration");
+		assertIntegrationSnapshot(task);
+		assertIntegration(task.workspace, task.revision);
+		task.integration = {
+			state: "integrating",
+			revision: task.revision,
+			parentBefore: task.workspace.base,
+		};
+		this.persist(task, false);
+		try {
+			integrateWorkspace(task.workspace, task.revision);
+			task.integration.state = "integrated";
+			task.integration.parentAfter = git(task.workspace.root, ["rev-parse", "HEAD"]);
+		} catch (error) {
+			task.integration.state = "interrupted";
+			this.persist(task, false);
+			throw error;
+		}
+		this.persist(task, false);
+		return this.get(id);
 	}
 }
 
 function validateDispatch(input: Dispatch): void {
+	if (input.role.editing !== (input.role.name === "builder"))
+		throw new Error("Role editing capability mismatch");
 	if (!input.brief.trim() || input.brief.length > 6000 || (input.context || "").length > 16000)
 		throw new Error("Task brief or context exceeds budget");
 	if (!input.model || !/^[\w.:[\]-]+$/.test(input.model))
 		throw new Error("Choose an explicit worker model");
 	assertNoSecrets(input);
+}
+
+function assertIntegrationSnapshot(task: Task): void {
+	if (!existsSync(task.workspace.path))
+		throw new Error("Task worktree missing; inspect retained branch manually");
+	if (
+		git(task.workspace.path, ["status", "--porcelain"]) ||
+		git(task.workspace.path, ["rev-parse", "HEAD"]) !== task.revision
+	)
+		throw new Error(
+			"Builder worktree changed after snapshot; capture and review changes explicitly before integration",
+		);
+}
+
+function replacementRevision(task?: Task): string | undefined {
+	if (!task) return;
+	return task.role.editing ? snapshotWorkspace(task.workspace) : task.workspace.base;
 }

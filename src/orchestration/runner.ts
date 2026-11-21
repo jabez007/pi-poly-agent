@@ -1,3 +1,4 @@
+import { safeFailure } from "./errors.ts";
 import { untilCanceled } from "./cancellation.ts";
 import { protectedWorkerProvider } from "./stream.ts";
 import { mkdirSync } from "node:fs";
@@ -50,7 +51,7 @@ export function createPiRunner(
 	approve: ApproveTest,
 	providerFactory = nativeWorkerProvider,
 ): TaskRunner {
-	return async ({ task, signal, progress }) => {
+	return async ({ task, signal, progress, session: recordSession }) => {
 		assertEnvironment(process.env);
 		const policy = loadPolicy(profile);
 		assertDelegation(task.provider, policy, task.depth);
@@ -122,6 +123,7 @@ export function createPiRunner(
 			if (event.type === "tool_execution_start") progress(`Executing ${event.toolName}`);
 		});
 		try {
+			recordSession?.(session.sessionManager.getSessionFile() || "");
 			assertChildModel(session, task, modelFallbackMessage);
 			if (signal.aborted) throw new Error("Canceled before prompt");
 			await untilCanceled(session.prompt(taskPrompt(task)), signal);
@@ -139,7 +141,7 @@ export function createPiRunner(
 function workerResult(messages: AgentSession["messages"]) {
 	const last = [...messages].reverse().find((m) => m.role === "assistant");
 	if (!last || last.role !== "assistant" || ["error", "aborted"].includes(last.stopReason))
-		throw new Error("Worker request failed");
+		throw safeFailure(last?.role === "assistant" ? last.errorMessage : undefined);
 	const text = last.content
 		.filter((c) => c.type === "text")
 		.map((c) => c.text)

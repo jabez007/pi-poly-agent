@@ -1,3 +1,4 @@
+import { qualificationPlan } from "../src/orchestration/qualification.ts";
 import { loadOrchestration } from "../src/orchestration/roles.ts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -93,6 +94,10 @@ export async function main(args: string[]): Promise<void> {
 	}
 	const policy = validateProfile();
 	loadOrchestration(PROFILE);
+	if (command === "qualify") {
+		console.log(JSON.stringify(qualificationPlan(args[1], policy), null, 2));
+		return;
+	}
 	if (command === "validate") {
 		const names = conflictingEnvironment(process.env);
 		console.log(
@@ -114,7 +119,8 @@ export async function main(args: string[]): Promise<void> {
 		if (names.length) process.exitCode = 1;
 		return;
 	}
-	if (command !== "launch") throw new Error("Commands: bootstrap, validate, launch");
+	if (command !== "launch")
+		throw new Error("Commands: bootstrap, validate, qualify PROVIDER, launch");
 	assertEnvironment(process.env);
 	assertProjectConfiguration(process.cwd());
 	if (!process.stdin.isTTY || !process.stdout.isTTY)
@@ -124,10 +130,19 @@ export async function main(args: string[]): Promise<void> {
 		stdio: "inherit",
 		env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
 	});
+	const forward = (signal: NodeJS.Signals) => {
+		if (child.exitCode === null) child.kill(signal);
+	};
+	const terminate = () => forward("SIGTERM");
+	const interrupt = () => forward("SIGINT");
+	process.on("SIGTERM", terminate);
+	process.on("SIGINT", interrupt);
 	await new Promise<void>((resolve, reject) => {
 		child.once("error", () => reject(new Error("Pi could not start")));
 		child.once("exit", (code) => {
-			process.exitCode = code || 0;
+			process.removeListener("SIGTERM", terminate);
+			process.removeListener("SIGINT", interrupt);
+			process.exitCode = code ?? 1;
 			resolve();
 		});
 	});

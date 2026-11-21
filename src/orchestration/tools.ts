@@ -58,6 +58,10 @@ export async function sandboxedTest(
 ): Promise<{ exitCode: number; output: string }> {
 	assertNoSecrets(command);
 	if (signal.aborted) throw new Error("Canceled");
+	if (!existsSync("/usr/bin/bwrap"))
+		throw new Error(
+			"Install Bubblewrap at /usr/bin/bwrap and enable unprivileged user namespaces. No host-shell fallback.",
+		);
 	// Only source and system runtimes are mounted. No host HOME, auth store, Git common directory,
 	// network, project-external write access, or inherited credentials are available to test code.
 	const args = [
@@ -94,7 +98,7 @@ export async function sandboxedTest(
 		"/home/worker",
 		"--setenv",
 		"PATH",
-		"/opt/poly-node:/usr/bin:/bin",
+		"/opt/poly-node:/usr/local/go/bin:/usr/bin:/bin",
 		"--setenv",
 		"CI",
 		"true",
@@ -148,6 +152,20 @@ export async function sandboxedTest(
 		});
 	});
 }
+
+export async function approvedTest(
+	command: string,
+	cwd: string,
+	approve: ApproveTest,
+	signal: AbortSignal,
+) {
+	if (!command.trim() || command.length > 2000)
+		throw new Error("Invalid test or preparation command");
+	assertNoSecrets(command);
+	if (!(await approve(command, cwd, signal)) || signal.aborted)
+		throw new Error("Test permission denied");
+	return sandboxedTest(command, cwd, signal);
+}
 export function testTool(cwd: string, approve: ApproveTest, tests: string[]): ToolDefinition {
 	return {
 		name: "run_test",
@@ -157,10 +175,7 @@ export function testTool(cwd: string, approve: ApproveTest, tests: string[]): To
 		parameters: Type.Object({ command: Type.String({ maxLength: 2000 }) }),
 		execute: async (_id, args: any, signal) => {
 			const active = signal || new AbortController().signal;
-			assertNoSecrets(args);
-			if (!(await approve(args.command, cwd, active)) || active.aborted)
-				throw new Error("Test permission denied");
-			const result = await sandboxedTest(args.command, cwd, active);
+			const result = await approvedTest(args.command, cwd, approve, active);
 			tests.push(`${args.command}: exit ${result.exitCode}`);
 			return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 		},

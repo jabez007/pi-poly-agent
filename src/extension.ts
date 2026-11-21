@@ -1,3 +1,4 @@
+import { focusedContext } from "./orchestration/context.ts";
 import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
 import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
@@ -383,7 +384,27 @@ export default async function polyExtension(
 			return { cancel: true };
 		}
 	});
-	registerOrchestration(pi, profile, () => (handoff ? JSON.stringify(handoff) : recalled));
+	registerOrchestration(pi, profile, async (brief) => {
+		let selected = recalled;
+		if (brief && policy.memory.enabled && ctx) {
+			try {
+				memoryTransport ??= await connectMemPalace();
+				selected = await new ProjectMemory(
+					memoryTransport,
+					projectIdentity(ctx.cwd).wing,
+					policy.memory.sharedWings,
+					Math.min(policy.memory.contextBudget ?? 12000, 8000),
+				).recall(brief);
+			} catch {
+				selected = "";
+				ctx.ui.notify(
+					"Task memory unavailable; reviewed context and task execution remain available.",
+					"warning",
+				);
+			}
+		}
+		return focusedContext(handoff, selected);
+	});
 	pi.on("session_shutdown", async () => {
 		acp?.close();
 		await memoryTransport?.close();

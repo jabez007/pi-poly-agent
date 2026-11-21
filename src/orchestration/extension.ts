@@ -1,3 +1,6 @@
+import { taskContext } from "./context.ts";
+import { taskLine, formatTask } from "./presentation.ts";
+import { worktreeReadiness, importNodeDependencies } from "./preparation.ts";
 import { join } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -7,29 +10,40 @@ import { MANAGED_PROVIDERS, assertDelegation, providerCapabilities } from "./cap
 import { loadOrchestration, type Role } from "./roles.ts";
 import { TaskManager, type Dispatch, type Task } from "./tasks.ts";
 import type { TaskRunner } from "./tasks.ts";
-import type { ApproveTest } from "./tools.ts";
+import { approvedTest, type ApproveTest } from "./tools.ts";
 import { createPiRunner } from "./runner.ts";
-import { cleanupWorkspace, integrateWorkspace, workspaceDiff, git } from "./worktrees.ts";
+import { cleanupWorkspace, workspaceDiff, git } from "./worktrees.ts";
 
 export function registerOrchestration(
 	pi: ExtensionAPI,
 	profile: string,
-	contextPacket: () => string,
+	contextPacket: (brief?: string) => string | Promise<string>,
 	makeRunner: (approve: ApproveTest) => TaskRunner = (approve) => createPiRunner(profile, approve),
 ): void {
 	let manager: TaskManager | undefined;
 	let current: ExtensionContext;
 	let stopped = false;
+	let generation = 0;
+	const published = new Set<string>();
+	const preparations = new Set<AbortController>();
 	const config = () => loadOrchestration(profile);
 	function publish(task: Task): void {
-		current?.ui.setStatus(
+		const active = manager ? manager.list().filter((t) => t.status === "running") : [];
+		current.ui.setStatus(
 			"poly-tasks",
-			manager
-				?.list()
-				.map((t) => `${t.id.slice(0, 8)} ${t.role.name}:${t.status}`)
-				.join(" | ") || "",
+			active.length
+				? active
+						.slice(0, 4)
+						.map((t) => `${t.id.slice(0, 8)} ${t.role.name}: ${t.progress}`)
+						.join(" | ")
+				: "Workers idle | /tasks",
 		);
-		if (task.status === "running" || stopped) return;
+		if (task.status === "running" || stopped || published.has(task.id)) return;
+		published.add(task.id);
+		current.ui.notify(
+			`${task.role.name} ${task.id.slice(0, 8)} ${task.status}${task.reviewOf ? "; review available" : ""}. ${task.integration?.state === "awaiting_review" ? "Independent review required." : ""} /tasks`,
+			task.status === "completed" ? "info" : "warning",
+		);
 		pi.appendEntry("poly-task-complete", task);
 		pi.sendMessage(
 			{
@@ -64,9 +78,125 @@ export function registerOrchestration(
 				config().concurrency,
 				config().timeoutMs,
 				publish,
+				prepareWorker,
 			);
+			for (const notice of manager.diagnostics) ctx.ui.notify(notice, "warning");
+			const recoverable = manager
+				.list()
+				.filter((t) => t.status === "interrupted" || t.integration?.state === "interrupted");
+			if (recoverable.length)
+				ctx.ui.notify(
+					`${recoverable.length} interrupted tasks need inspection. Use /tasks or /task ID recover. No request was replayed.`,
+					"warning",
+				);
 		}
 		return manager;
+	}
+	async function prepareWorker(task: Task, signal: AbortSignal): Promise<void> {
+		const checks = worktreeReadiness(task.workspace.path);
+		if (!checks.length) return;
+		current.ui.notify(checks.flatMap((c) => c.details).join("\n"), "info");
+		if (!task.role.editing || !checks.some((c) => c.kind === "node" && !c.ready)) return;
+		const approved = await current.ui.confirm(
+			"Prepare dependencies for this worker?",
+			"Copy the parent's node_modules through secret screening into this isolated worktree. No installer, network request, or lifecycle script runs. Decline to continue without dependencies.",
+		);
+		if (signal.aborted) throw new Error("Canceled preparation");
+		if (approved) importNodeDependencies(task.workspace);
+	}
+	async function prepareExisting(ctx: ExtensionContext, task: Task, command = ""): Promise<void> {
+		if (!ctx.hasUI || ctx.mode !== "tui" || task.status === "running")
+			throw new Error("Preparation requires an inactive task and interactive approval");
+		if (!task.role.editing) throw new Error("Preparation commands require an editing task");
+		if (command) {
+			const controller = new AbortController();
+			preparations.add(controller);
+			try {
+				const details = await approvedTest(
+					command,
+					task.workspace.path,
+					async (text, cwd) =>
+						ctx.ui.confirm(
+							"Run preparation command once in the sandbox?",
+							`${text}\n${cwd}\nNo networking or host credentials. Inspect lifecycle scripts yourself before approving.`,
+						),
+					controller.signal,
+				);
+				if (controller.signal.aborted)
+					throw new Error("Preparation canceled by session shutdown or switch");
+				tasks(ctx).recordPreparation(task.id, command, details.exitCode);
+				ctx.ui.notify(`Preparation exit ${details.exitCode}\n${details.output}`, "info");
+			} finally {
+				preparations.delete(controller);
+			}
+			return;
+		}
+		ctx.ui.notify(
+			worktreeReadiness(task.workspace.path)
+				.flatMap((p) => p.details)
+				.join("\n") || "No recognized manifests.",
+			"info",
+		);
+		if (
+			await ctx.ui.confirm(
+				"Copy screened parent dependencies?",
+				`Copy node_modules into ${task.workspace.path}. No network or installer; source changes retained.`,
+			)
+		)
+			importNodeDependencies(task.workspace);
+	}
+	async function recoverTask(ctx: ExtensionContext, task: Task): Promise<void> {
+		ctx.ui.notify(formatTask(task), "info");
+		const choice = await modelChoice(ctx, task.role);
+		if (choice) await launch(ctx, task.role, task.brief, choice, task.reviewOf, task.id);
+	}
+	async function offerReview(ctx: ExtensionContext, task: Task): Promise<void> {
+		const epoch = generation;
+		const host = manager!;
+		const completed = await host.wait(task.id);
+		if (epoch !== generation || stopped || completed.status !== "completed") return;
+		if (
+			!(await ctx.ui.confirm(
+				"Builder complete. Launch independent review?",
+				`${formatTask(completed)}\nReviewer: ${task.workflowReviewModel}`,
+			)) ||
+			stopped ||
+			epoch !== generation
+		)
+			return;
+		const role = config().roles.find((r) => r.name === "reviewer")!;
+		const review = await launch(
+			ctx,
+			role,
+			`Independently review ${completed.id} against acceptance criteria: ${completed.brief}`,
+			task.workflowReviewModel!,
+			task.id,
+		);
+		if (review) {
+			await host.wait(review.id);
+			if (!stopped && epoch === generation) await taskActions(ctx, host.get(task.id));
+		}
+	}
+	async function taskActions(ctx: ExtensionContext, task: Task): Promise<void> {
+		ctx.ui.notify(formatTask(task), "info");
+		const actions = ["Inspect diff", "Leave for later"];
+		if (task.status === "completed" && task.role.editing)
+			actions.unshift("Review implementation", "Inspect review and integrate");
+		if (["failed", "canceled", "timed_out", "interrupted"].includes(task.status))
+			actions.unshift("Recover with a new worker");
+		if (task.status === "running") actions.unshift("Cancel worker");
+		const choice = await ctx.ui.select("Task actions", actions);
+		if (choice === "Inspect diff")
+			ctx.ui.notify(workspaceDiff(task.workspace).diff || "No source diff.", "info");
+		if (choice === "Recover with a new worker") await recoverTask(ctx, task);
+		if (choice === "Cancel worker") await manager!.cancel(task.id);
+		if (choice === "Inspect review and integrate") await integrateTask(ctx, task, manager!);
+		if (choice === "Review implementation") {
+			const role = config().roles.find((r) => r.name === "reviewer")!;
+			const model = await modelChoice(ctx, role, task.workflowReviewModel);
+			if (model)
+				await launch(ctx, role, `Independently review ${task.id}: ${task.brief}`, model, task.id);
+		}
 	}
 	async function modelChoice(
 		ctx: ExtensionContext,
@@ -88,7 +218,10 @@ export function registerOrchestration(
 		brief: string,
 		model: string,
 		reviewOf?: string,
+		replacementOf?: string,
+		workflowReviewModel?: string,
 	): Promise<Task | undefined> {
+		const epoch = generation;
 		if (!ctx.hasUI || ctx.mode !== "tui")
 			throw new Error("Delegation requires interactive authorization");
 		const slash = model.indexOf("/");
@@ -96,15 +229,9 @@ export function registerOrchestration(
 		const provider = model.slice(0, slash);
 		assertDelegation(provider, loadPolicy(profile), 1);
 		const list = tasks(ctx);
-		const previous = reviewOf ? list.get(reviewOf) : undefined;
-		const context = [
-			contextPacket(),
-			previous
-				? `Independent review of ${previous.id}\nRevision: ${previous.revision}\nChanged files: ${previous.result?.files.join(", ")}\nPrevious agent result (unverified):\n${JSON.stringify(previous.result)}`
-				: "",
-		]
-			.filter(Boolean)
-			.join("\n\n");
+		const reference = reviewOf || replacementOf;
+		const previous = reference ? list.get(reference) : undefined;
+		const context = taskContext(await contextPacket(brief), previous);
 		assertNoSecrets({ brief, context });
 		const draft = await ctx.ui.editor(
 			"Review focused task context. No parent transcript is inherited.",
@@ -115,7 +242,9 @@ export function registerOrchestration(
 		if (
 			!(await ctx.ui.confirm(
 				`Launch ${role.name} with ${model}?`,
-				"Independent session, isolated worktree, depth 1. Test commands require separate approval. Provider plan usage applies.",
+				replacementOf
+					? "Create a NEW worker from preserved source changes. This captures a task-only snapshot, retains the original task, and does not restore provider-private execution state."
+					: "Independent session, isolated worktree, depth 1. Test commands require separate approval. Provider plan usage applies.",
 			))
 		)
 			return;
@@ -128,7 +257,10 @@ export function registerOrchestration(
 			context: edited.context,
 			depth: 1,
 			reviewOf,
+			replacementOf,
+			workflowReviewModel,
 		};
+		if (epoch !== generation || stopped) throw new Error("Session changed; task launch canceled");
 		const task = list.dispatch(input);
 		ctx.ui.notify(`Started ${task.id} (${role.name}, ${model}). Use /tasks or /task.`, "info");
 		return task;
@@ -176,15 +308,46 @@ export function registerOrchestration(
 		handler: delegate,
 	});
 	pi.registerCommand("tasks", {
-		description: "List task state and provider attribution",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify(
-				tasks(ctx)
-					.list()
-					.map((t) => `${t.id} ${t.role.name} ${t.provider}/${t.model}: ${t.status}`)
-					.join("\n") || "No tasks.",
-				"info",
+		description: "Inspect active and recovered work, results, and next actions",
+		handler: async (args, ctx) => {
+			const all = tasks(ctx).list().reverse();
+			ctx.ui.notify(all.map((t) => taskLine(t)).join("\n") || "No tasks.", "info");
+			if (!all.length || args.trim() === "all" || !ctx.hasUI || ctx.mode !== "tui") return;
+			const choices = all.slice(0, 20).map((t) => taskLine(t));
+			const selected = await ctx.ui.select("Inspect task (most recent 20)", choices);
+			if (selected) await taskActions(ctx, all[choices.indexOf(selected)]);
+		},
+	});
+	pi.registerCommand("implement", {
+		description: "Guided implementation followed by a different model's independent review",
+		handler: async (args, ctx) => {
+			if (!ctx.hasUI || ctx.mode !== "tui")
+				throw new Error("Workflow requires interactive authorization");
+			const brief =
+				args.trim() || (await ctx.ui.input("Implementation objective and acceptance criteria"));
+			if (!brief) return;
+			const roles = config().roles;
+			const builder = await modelChoice(ctx, roles.find((r) => r.name === "builder")!);
+			const reviewer = await modelChoice(ctx, roles.find((r) => r.name === "reviewer")!);
+			if (!builder || !reviewer) return;
+			if (builder === reviewer)
+				throw new Error("Choose a different provider/model for independent guided review");
+			const task = await launch(
+				ctx,
+				roles.find((r) => r.name === "builder")!,
+				brief,
+				builder,
+				undefined,
+				undefined,
+				reviewer,
 			);
+			if (task)
+				void offerReview(ctx, task).catch(() =>
+					ctx.ui.notify(
+						"Guided review stopped. Use /review or /tasks; results remain preserved.",
+						"warning",
+					),
+				);
 		},
 	});
 	pi.registerCommand("review", {
@@ -207,7 +370,7 @@ export function registerOrchestration(
 	pi.registerCommand("task", {
 		description: "Inspect, cancel, diff, integrate, or clean a task",
 		handler: async (args, ctx) => {
-			const [id, action = "show"] = args.trim().split(/\s+/);
+			const [id, action = "show", ...command] = args.trim().split(/\s+/);
 			const list = tasks(ctx);
 			const task = list.get(id);
 			if (action === "cancel") {
@@ -219,7 +382,19 @@ export function registerOrchestration(
 				return;
 			}
 			if (action === "integrate") {
-				await integrateTask(ctx, task, list.list());
+				await integrateTask(ctx, task, list);
+				return;
+			}
+			if (action === "recover") {
+				await recoverTask(ctx, task);
+				return;
+			}
+			if (action === "prepare") {
+				await prepareExisting(ctx, task, command.join(" "));
+				return;
+			}
+			if (action === "next") {
+				await taskActions(ctx, task);
 				return;
 			}
 			if (action === "cleanup") {
@@ -284,7 +459,12 @@ export function registerOrchestration(
 			};
 		},
 	});
+	pi.on("session_start", async (_event, ctx) => {
+		if (ctx.hasUI && ctx.mode === "tui") tasks(ctx);
+	});
 	pi.on("session_before_switch", async () => {
+		generation++;
+		for (const controller of preparations) controller.abort();
 		if (manager) {
 			stopped = true;
 			await manager.close();
@@ -293,23 +473,30 @@ export function registerOrchestration(
 		stopped = false;
 	});
 	pi.on("session_shutdown", async () => {
+		generation++;
+		for (const controller of preparations) controller.abort();
 		stopped = true;
 		await manager?.close();
 	});
 }
 
-function formatTask(task: Task): string {
-	return [
-		`Task ${task.id}: ${task.status}`,
-		`${task.role.name} | ${task.provider}/${task.model} | parent ${task.parent}`,
-		`Worktree: ${task.workspace.path}\nBranch: ${task.workspace.branch}\nBase: ${task.workspace.base}\nSnapshot: ${task.revision || "none"}`,
-		task.result ? JSON.stringify(task.result, null, 2) : task.error || task.progress,
-	].join("\n\n");
-}
-async function integrateTask(ctx: ExtensionContext, task: Task, all: Task[]): Promise<void> {
+async function integrateTask(
+	ctx: ExtensionContext,
+	task: Task,
+	manager: TaskManager,
+): Promise<void> {
 	if (task.status !== "completed" || !task.role.editing || !task.revision)
 		throw new Error("Only completed builder snapshots can be integrated");
-	const reviews = all.filter((r) => r.reviewOf === task.id && r.status === "completed");
+	const reviews = manager
+		.list()
+		.filter(
+			(r) =>
+				r.reviewOf === task.id &&
+				r.role.name === "reviewer" &&
+				!r.role.editing &&
+				r.status === "completed" &&
+				(r.reviewRevision || r.workspace.base) === task.revision,
+		);
 	if (!reviews.length) throw new Error("Complete an independent review before integration");
 	if (
 		git(task.workspace.path, ["status", "--porcelain"]) ||
@@ -331,7 +518,7 @@ async function integrateTask(ctx: ExtensionContext, task: Task, all: Task[]): Pr
 			"Cherry-pick into the clean, unchanged parent branch. Review all findings and the diff first.",
 		))
 	)
-		integrateWorkspace(task.workspace, task.revision);
+		manager.integrate(task.id);
 }
 
 function parseTaskPacket(text: string): { brief: string; context: string } {

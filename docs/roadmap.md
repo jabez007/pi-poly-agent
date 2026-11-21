@@ -1,22 +1,22 @@
-# Roadmap after v0.2
+# Roadmap after v0.3
 
-v0.2 delivers provider invocation hardening and a tested delegation slice: independent Pi SDK workers, parallel task status, isolated builder worktrees, read-only independent review, explicit integration, and reviewed memory context. Live authentication and model execution remain unqualified.
+v0.3 retains the Pi SDK worker architecture and adds durable recovery, a project host lease, exact-revision integration, worktree prerequisites, categorized failures, guided implementation/review, task selection, focused memory context, qualification plans, and optional terminal integration examples. It does not establish live provider compatibility.
 
-## Next three priorities
+## Priorities for v0.4
 
-1. **Qualify the authorized native workflow.** With separate explicit authorization, test actual Codex → Kimi and Codex → Z.AI implementation/review in disposable repositories. Check cancellation, credential refresh, model availability, test approval, and failure reporting. Resolve Claude subscription authorization separately. Verify the official Google runtime and direct ACP recovery without introducing Google workers.
-2. **Improve worker recovery and development tooling.** Add a per-project host lease, explicit interrupted-session continuation, dependency provisioning for isolated worktrees, scoped code-search tools, and safer cleanup of reviewed branches. Preserve independent review and final human approval. Distinct custom API or open-weight endpoints need explicit billing and credential policies before registration.
-3. **Improve context quality.** Add indexed provenance links between stable knowledge IDs and session snapshots, stronger deduplication across paraphrases, conflict/supersession review, and reviewed incremental checkpoints. Expand deterministic retrieval fixtures before enabling automatic memory extraction. Keep task execution independent of MemPalace availability.
+1. Qualify Codex → Kimi and Codex → Z.AI with explicitly authorized accounts using the [manual checklist](qualification.md). Measure cancellation, credential refresh, model availability, approval behavior, and naturally occurring provider errors. Keep Claude authorization and Google direct-only runtime qualification separate.
+2. Qualify explicit Pi session continuation, including pending-tool detection and model-generation interruption. Until replay safety is established, keep fresh replacement workers and preserve original records. Improve recovery for missing worktrees, moved parent branches, interrupted acquisition guards, and interrupted Git integration without automatic resets.
+3. Extend preparation through small language adapters: offline package caches, Python dependency checks, and Go vendor validation. Keep installers opt-in, isolate cache contents, and avoid copying credentials. Current Node copying is intentionally strict and can refuse legitimate dependency fixtures; no code automatically runs an installer to work around refusal.
+4. Improve context with indexed source links, paraphrase deduplication, reviewed supersession of conflicting knowledge, and incremental checkpoints. Keep agent claims unverified and task state outside MemPalace.
+5. Add guided revision requests after review and richer scoped code search. Keep roles independent of models, explicit launch/integration approvals, bounded concurrency, and depth one.
 
-## Remaining P2 work
+## Deliberate limits
 
-- Memory deduplication is stable for unchanged knowledge with stable sources. Paraphrases and changed source references may produce multiple backend drawers. Retrieval deduplicates normalized overlap but does not reconcile conflicting claims automatically.
-- Handoff drafting uses deterministic Pi history and task results, not a model-authored summary. It deliberately marks summaries and findings unverified. Selection of source facts and verification still need human review.
-- ACP restoration supports advertised stable `session/load`. Draft `session/resume`, session enumeration, stale remote bindings, and live interruption behavior need qualification. No provider-private state is simulated from a local handoff.
-- Manual compaction is gated by a reviewed MemPalace checkpoint. Automatic compaction remains disabled. Bounded pre-request retries require proof that a failed transport accepted no prompt or non-idempotent operation; no retry policy is enabled speculatively.
-- Worker progress shows activity and completed structured results. Live token streaming, richer findings renderers, task filtering, and notification quality can improve without a separate dashboard.
-- Researchers inspect local code and supplied documentation only. A policy-reviewed web research tool is not implemented.
-
-## Optional terminal integration
-
-Add tmux and Neovim commands, Lazygit task-branch shortcuts, planning/review prompt templates, and compact status widgets as opt-in modules. Retain standalone Pi and normal Git workflows. No daemon, distributed queue, or web frontend is planned for these features.
+- No authenticated provider tests have run for this milestone. Mock transport tests and local sandbox/TUI tests are separate evidence.
+- Worker private execution state is not resumed. Replacement is explicit, starts a new transcript, and preserves source/history.
+- Automatic retries, compaction, and provider switching remain disabled. A failed stream does not prove that a generation or tool action had no effects.
+- Managed host exclusion applies to the same project/profile on a local Linux filesystem. It is not a distributed lock or a guard against unmanaged programs and manual Git changes.
+- Python and Go preparation reports prerequisites; it does not provision virtual environments, external module caches, or language runtimes.
+- Reviewers inspect source and diffs with read-only tools. Researchers inspect local code and supplied documentation, without web tools.
+- Memory retrieval is optional and bounded. It does not automatically verify agent findings or reconcile contradictions.
+- Custom API/open-weight endpoints remain unconfigured pending separate billing and credential policies. Google consumer ACP workers remain forbidden, and Claude subscription workers remain blocked.

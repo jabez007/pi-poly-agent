@@ -83,3 +83,9 @@ Run `npm run validate` for variable names only. Correct the intended launch envi
 Codex, Kimi, and opted-in Z.AI parents can request the `delegate_task` tool, subject to interactive approval. A user can invoke delegation commands while another direct provider is selected, but only an authorized native worker is dispatched. Worker role configuration never changes these capabilities. Read-only roles cannot become builders by editing configuration.
 
 No provider/model fallback is selected when child initialization, authentication, or execution fails. Native provider transports receive `maxRetries: 0`. Child sessions share Pi's supported isolated credential store through its SDK; tokens are not copied into task records, tool environments, or memory.
+
+## Qualification and recovery
+
+`npm run qualify -- PROVIDER` prints a manual plan for `openai-codex`, `kimi-coding`, or `zai`. It performs no credential resolution, login, model request, or live test. Follow [qualification procedures](qualification.md) only after reviewing and choosing the operations yourself.
+
+Native worker failures have fixed, secret-screened categories and explicit recovery guidance. Provider/model identity never changes automatically. Quota, authentication, context, or uncertain transport failures do not trigger retries. `/task ID recover` is an approved new worker with a fresh transcript and preserved source changes. Existing provider-private execution state is not restored. Claude worker delegation remains blocked; Google consumer ACP remains direct-interaction-only.

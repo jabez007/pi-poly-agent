@@ -14,6 +14,12 @@ Use Node 22.19 or newer. This command uses the checkout's isolated `.poly/agent`
 
 Unknown project `.pi/settings.json`, `models.json`, and `mcp.json` files cause launch to stop for review. They are preserved. Parent sessions retain Pi's normal AGENTS.md discovery. Workers receive fresh context and must read relevant AGENTS.md files through their scoped tools.
 
+## Implement with guided independent review
+
+Run `/implement Objective and acceptance criteria`. Select an authorized Builder and a different provider/model for review. Pi previews each focused packet and asks for each launch. When the builder completes, accept the review offer. The final action picker can show the diff and review findings, then ask whether to integrate. Declining any prompt preserves existing results and worktrees.
+
+Use `/tasks` for a compact list with elapsed time, operation, provider/model, branch, result availability, and integration state. Select a task for its next action. `/tasks all` prints every record without opening a picker. Guided offers stop when switching or shutting down Pi sessions. Restart never starts a reviewer automatically.
+
 ## Delegate implementation
 
 Commit or stash your changes first. Delegation refuses a dirty parent, including untracked files. It never stashes or overwrites them.
@@ -30,7 +36,9 @@ Builders can read, edit, and write text files inside their worktree. Access outs
 
 A builder can request `run_test`. Inspect its command before the single-use approval. Bubblewrap gives it network-disabled execution with a temporary HOME, system runtimes, and the task worktree at `/workspace`. No provider credentials or Git common directory are mounted. Tool commands cannot fall back to the host shell if Bubblewrap or namespaces are unavailable. Test results record actual tool execution, replacing model-authored test claims.
 
-Dependencies must exist in the task worktree. Network installation and access to the parent's `node_modules` are unavailable inside the sandbox. Provision dependencies manually when appropriate. Build scripts may modify the task worktree and produce outputs. Successful task snapshots include all resulting non-ignored changes, so inspect the diff before integration.
+The preparation check detects Node, Python, and Go manifests before worker execution. For Node builders, Pi offers a screened copy of the parent's `node_modules` into the task worktree. It requires confirmation, an ignored destination, no existing destination, no external/absolute symlinks, no sensitive filenames, and content screening. A refusal leaves the destination absent. No installer, lifecycle script, or network operation runs. Strict screening can refuse legitimate dependency fixtures; inspect and provision dependencies manually rather than bypassing screening.
+
+Python reports system-runtime availability and asks you to verify package requirements manually. Go reports runtime and vendor availability; its external module cache is not mounted. Neither check promises that dependencies match the manifests. Approve the actual test command to establish readiness. `/task ID prepare` offers the same screened Node copy for an inactive task. It does not install Python or Go packages. `/task ID prepare COMMAND` runs a specifically confirmed command for an inactive builder in the same network-disabled sandbox and records its exit status. This path has no host-shell fallback. Review any lifecycle scripts before approving a command; offline caches must already exist inside the worktree. Build scripts may modify the task worktree and produce outputs. Successful task snapshots include all resulting non-ignored changes, so inspect the diff before integration.
 
 ## Request an independent review
 
@@ -50,13 +58,19 @@ The parent model can request `delegate_task` and inspect `task_status`. To revie
 
 ## Accept or discard changes
 
-Run `/task BUILDER_ID integrate` after a completed independent review. Pi shows the diff and review findings, then asks for approval. Integration cherry-picks the captured commit into the parent only if the parent is clean and still at the recorded base. A changed builder worktree also prevents integration. Review findings are evidence for your decision; a completed review does not mean the change is correct.
+Run `/task BUILDER_ID integrate` after a completed independent review. Pi shows the diff and review findings, then asks for approval. Integration cherry-picks the captured commit into the parent only if the parent is clean and still at the recorded base. A changed builder worktree or parent branch, detached parent HEAD, unfinished merge/cherry-pick/rebase, or review of a different revision prevents integration. Guards run again after confirmation. The task records integration intent before Git starts and the resulting parent revision after success. Review findings are evidence for your decision; a completed review does not mean the change is correct.
 
 If the parent moved, use your normal Git tools to inspect or integrate the task branch manually. If a cherry-pick reports a conflict, inspect it with Git or Lazygit. The extension does not reset or overwrite conflicts.
 
 Run `/task ID cancel` to stop active work. Timeout defaults to 15 minutes. Native provider cancellation and sandbox process termination propagate from the task signal. Worktrees remain available on success, failure, timeout, and cancellation. `/task ID cleanup` removes a clean inactive worktree without forcing deletion or removing its branch. Dirty worktrees require manual inspection and preservation of changes first.
 
-Task records live under `.poly/agent/tasks/PROJECT_WING/ID/task.json`. Child Pi session files live next to that task's worktree in `sessions/`. On restart, running records become `interrupted`. Results and worktrees survive; provider work is not replayed. Use one Pi task host per project. Cross-process dispatch coordination is not implemented.
+Task records live under `.poly/agent/tasks/PROJECT_WING/ID/task.json`. Child Pi session files live next to that task's worktree in `sessions/`. On restart, running records become `interrupted`. Results and worktrees survive; provider work is not replayed. A host lease prevents a second managed host for the same project/profile from taking ownership. On Linux, restart checks the owning PID and process start identity before reclaiming a dead lease. It never kills an unknown PID. Damaged records, orphaned temporary records, and missing worktrees produce notices and retain files.
+
+Use `/task ID recover` on interrupted, failed, timed-out, or canceled work. Inspect the original task first, choose an authorized provider/model, and review the reconstructed brief. Confirming creates a new task/transcript from a captured source snapshot while preserving the original record and parent/replacement links. It is not a resumed provider session. All recovered changes are included in the replacement's single reviewable commit. Completed tasks are inspected or reviewed, not replayed. A moved parent or missing original worktree requires manual Git recovery.
+
+If lease acquisition itself was interrupted, Pi fails closed with the `host-acquisition` path. Close other hosts, inspect `host.json` and running processes locally, then remove only the abandoned acquisition directory after confirming no host is acquiring it. A foreign-machine or malformed lease requires manual inspection. Never delete a live host's lease.
+
+Interrupted integration is reported separately. Inspect the parent using `git status`, `git log`, and your normal Git tools before completing or aborting an unfinished cherry-pick yourself. Pi neither auto-replays integration nor claims to know whether an interrupted Git operation completed.
 
 ## Configure roles and limits
 
@@ -93,3 +107,7 @@ Use `/model`, then `/handoff-use`. Review the packet in the editor and submit it
 After explicit Google activation, `/poly-google-discover` can attempt documented `session/load` when the runtime advertises support and Pi has a saved binding for the same project directory. Failed or unsupported restoration preserves the binding and Pi history. Prepare `/handoff`, then use `/poly-google-discover new` and confirm if you want a new official session. A local handoff never claims to restore provider-private execution state.
 
 Automatic compaction and turn retries remain disabled. Manual `/compact` requires a reviewed `/handoff`, enabled MemPalace, confirmation, and a successful checkpoint first. Compaction that would replay a turn is denied. Google ACP compaction is denied because its consumer session cannot receive an automated summary request.
+
+## Qualify providers and use terminal tools
+
+Use the [manual provider checklist](qualification.md) for explicitly authorized account tests. See [terminal integration examples](terminal.md) for optional tmux, Neovim, AstroNvim, and Lazygit workflows.

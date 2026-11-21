@@ -91,9 +91,11 @@ test("two concurrent tasks, limit, cancellation, timeouts, failures and restart 
 	assert.throws(() => manager.dispatch(input()), /concurrency/);
 	await manager.cancel(one.id);
 	assert.equal(manager.get(one.id).status, "canceled");
-	const recovered = new TaskManager(store, root, defaultPolicy, async () => result);
-	assert.equal(recovered.get(two.id).status, "interrupted");
+	assert.throws(() => new TaskManager(store, root, defaultPolicy, async () => result), /host/);
 	await manager.close();
+	const recovered = new TaskManager(store, root, defaultPolicy, async () => result);
+	assert.equal(recovered.get(two.id).status, "canceled");
+	await recovered.close();
 	const failed = new TaskManager(
 		mkdtempSync(join(tmpdir(), "poly-fail-")),
 		root,
