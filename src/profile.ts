@@ -1,3 +1,4 @@
+import { loadPlatform } from "./platform/config.ts";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
@@ -74,6 +75,7 @@ function validateSettings(file: string): void {
 			throw new Error("Managed settings differ; existing configuration was left untouched");
 	}
 	const allowed = [...NATIVE_PROVIDERS, BRIDGE_PROVIDER, ACP_PROVIDER] as unknown[];
+	allowed.push(...loadPlatform(dirname(file)).providers.map((p) => p.id));
 	if (!allowed.includes(settings.defaultProvider))
 		throw new Error("Default provider is outside the managed profile");
 	if (Object.keys(settings).some((key) => !(key in SETTINGS) && !mutable.includes(key)))

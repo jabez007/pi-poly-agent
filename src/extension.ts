@@ -1,3 +1,9 @@
+import { loadIntegrations } from "./platform/integrations.ts";
+import { loadPlatform } from "./platform/config.ts";
+import { ProviderRegistry } from "./platform/providers.ts";
+import { ContextRegistry, nativeContext, memPalaceContext } from "./platform/context.ts";
+import type { ContextBackend } from "./platform/context.ts";
+import type { WorkerResources } from "./platform/contracts.ts";
 import { focusedContext } from "./orchestration/context.ts";
 import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
 import { registerOrchestration } from "./orchestration/extension.ts";
@@ -37,9 +43,27 @@ import {
 export default async function polyExtension(
 	pi: ExtensionAPI,
 	acpFactory?: AcpFactory,
+	integrations: {
+		providers?: ProviderRegistry;
+		context?: ContextBackend[];
+		resources?: WorkerResources;
+	} = {},
 ): Promise<void> {
 	const profile = process.env.PI_POLY_PROFILE || PROFILE;
 	const policy = validateProfile(profile);
+	const platform = loadPlatform(profile);
+	const memoryEnabled = usesMemPalace(platform, policy.memory.enabled);
+	const providers = integrations.providers || new ProviderRegistry(() => loadPolicy(profile));
+	const installed = await loadIntegrations(profile, providers, {
+		registerCommand: pi.registerCommand.bind(pi),
+		on: pi.on.bind(pi),
+	});
+	for (const instance of platform.providers) providers.register(instance);
+	const contexts = new ContextRegistry();
+	contexts.register(nativeContext(() => focusedContext(handoff, "")));
+	contexts.register(memPalaceContext(policy.memory.sharedWings));
+	for (const backend of [...installed.context, ...(integrations.context || [])])
+		contexts.register(backend);
 	let ctx: ExtensionContext;
 	let directPrompt: string | undefined;
 	let acp: AcpSession | undefined;
@@ -86,6 +110,8 @@ export default async function polyExtension(
 	const zai = zaiProvider();
 	pi.registerProvider(guardedProvider(zai, () => check(zai.id)));
 
+	registerInstanceProviders(pi, providers);
+
 	await registerClaudeBridge(pi, profile, policy.claude, () => check(BRIDGE_PROVIDER));
 
 	const googleConfig = (
@@ -126,7 +152,7 @@ export default async function polyExtension(
 		query = "project decisions current task handoff",
 	): Promise<void> {
 		recalled = "";
-		if (!policy.memory.enabled) return;
+		if (!memoryEnabled) return;
 		try {
 			memoryTransport ??= await connectMemPalace();
 			const project = projectIdentity(context.cwd);
@@ -162,7 +188,10 @@ export default async function polyExtension(
 			if (entry.type === "custom" && entry.customType === "poly-checkpoint")
 				savedDigest = String(entry.data);
 		}
-		context.ui.setStatus("poly", providerStatus(context.model?.provider || "no provider", policy));
+		context.ui.setStatus(
+			"poly",
+			activeProviderStatus(context.model?.provider || "no provider", providers, policy),
+		);
 		await recall(context);
 	});
 	pi.on("input", (event, context) => {
@@ -194,7 +223,10 @@ export default async function polyExtension(
 	});
 	pi.on("model_select", async (_event, context) => {
 		directPrompt = undefined;
-		context.ui.setStatus("poly", providerStatus(context.model?.provider || "no provider", policy));
+		context.ui.setStatus(
+			"poly",
+			activeProviderStatus(context.model?.provider || "no provider", providers, policy),
+		);
 		await recall(context);
 	});
 	pi.on("tool_call", async (event, context) => {
@@ -223,7 +255,7 @@ export default async function polyExtension(
 					`zai: coding-plan key ${policy.zaiCodingPlan ? "allowed" : "locked"}`,
 					`claude-bridge: official SDK ${policy.claude.enabled ? "activated, live unverified" : "locked, authorization unresolved"}`,
 					`antigravity-acp: direct user only, ${policy.google.enabled ? "activated, live unverified" : "locked"}`,
-					`memory: ${policy.memory.enabled ? "enabled" : "optional, disabled"}`,
+					`memory: ${memoryEnabled ? "enabled" : "optional, disabled"}`,
 				].join("\n"),
 				"info",
 			),
@@ -309,7 +341,7 @@ export default async function polyExtension(
 	pi.registerCommand("memory-save", {
 		description: "Save the reviewed handoff through MemPalace's deduplicated checkpoint",
 		handler: async (_args, context) => {
-			if (!policy.memory.enabled || !handoff) {
+			if (!memoryEnabled || !handoff) {
 				context.ui.notify("Enable memory in poly.json and prepare /handoff first.", "warning");
 				return;
 			}
@@ -363,7 +395,7 @@ export default async function polyExtension(
 				willRetry: event.willRetry,
 				interactive: context.hasUI && context.mode === "tui",
 				provider: context.model?.provider || "",
-				memoryEnabled: loadPolicy(profile).memory.enabled,
+				memoryEnabled: memoryEnabled && loadPolicy(profile).memory.enabled,
 				handoff,
 			},
 			() =>
@@ -384,29 +416,65 @@ export default async function polyExtension(
 			return { cancel: true };
 		}
 	});
-	registerOrchestration(pi, profile, async (brief) => {
-		let selected = recalled;
-		if (brief && policy.memory.enabled && ctx) {
-			try {
-				memoryTransport ??= await connectMemPalace();
-				selected = await new ProjectMemory(
-					memoryTransport,
-					projectIdentity(ctx.cwd).wing,
-					policy.memory.sharedWings,
-					Math.min(policy.memory.contextBudget ?? 12000, 8000),
-				).recall(brief);
-			} catch {
-				selected = "";
+	registerOrchestration(
+		pi,
+		profile,
+		async (brief, sources) => {
+			if (!ctx) return focusedContext(handoff, "");
+			const configuration = loadPlatform(profile, ctx.cwd);
+			const selected = configuration.context;
+			const configured =
+				configuration.legacy && memoryEnabled
+					? [...selected, "mempalace"]
+					: selected.filter((id) => id !== "mempalace" || memoryEnabled);
+			const ids = sources ? configured.filter((id) => sources.includes(id)) : configured;
+			const result = await contexts.retrieve(ids, {
+				project: projectIdentity(ctx.cwd).wing,
+				objective: brief || "current project task",
+				budget: 14000,
+			});
+			if (result.unavailable.length)
 				ctx.ui.notify(
-					"Task memory unavailable; reviewed context and task execution remain available.",
+					`Context unavailable: ${result.unavailable.join(", ")}. Local task execution remains available.`,
 					"warning",
 				);
-			}
-		}
-		return focusedContext(handoff, selected);
-	});
+			return result.text;
+		},
+		undefined,
+		{ providers, resources: integrations.resources || installed.resources },
+	);
 	pi.on("session_shutdown", async () => {
 		acp?.close();
 		await memoryTransport?.close();
+		await contexts.close();
 	});
+}
+
+function registerInstanceProviders(pi: ExtensionAPI, providers: ProviderRegistry): void {
+	for (const instance of providers
+		.list()
+		.filter(
+			(p) => !["openai-codex", "kimi-coding", "zai", BRIDGE_PROVIDER, ACP_PROVIDER].includes(p.id),
+		)) {
+		if (instance.enabled) pi.registerProvider(providers.provider(instance.id, true));
+	}
+}
+
+function activeProviderStatus(
+	id: string,
+	providers: ProviderRegistry,
+	policy: Parameters<typeof providerStatus>[1],
+): string {
+	try {
+		const instance = providers.get(id);
+		if (["local", "api"].includes(instance.billing))
+			return `Poly | ${id} | ${instance.billing} | ${providers.capabilities(id).delegation ? "worker eligible" : "direct only"}`;
+	} catch {
+		/* Pi can display an unavailable historical model. */
+	}
+	return providerStatus(id, policy);
+}
+
+function usesMemPalace(platform: ReturnType<typeof loadPlatform>, enabled: boolean): boolean {
+	return enabled && (platform.legacy || platform.context.includes("mempalace"));
 }

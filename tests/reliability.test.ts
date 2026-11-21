@@ -51,14 +51,14 @@ test("a project host lease prevents a second manager from interrupting live task
 	await restarted.close();
 });
 
-test("only the reviewer role can produce an integration review", async () => {
+test("an editing agent cannot attest an integration review", async () => {
 	const { root, directory } = fixture();
 	const manager = new TaskManager(directory, root, defaultPolicy, async () => result);
 	try {
 		const builder = await manager.wait(manager.dispatch(dispatch()).id);
 		assert.throws(
-			() => manager.dispatch({ ...dispatch("planner"), reviewOf: builder.id }),
-			/reviewer/i,
+			() => manager.dispatch({ ...dispatch("builder"), reviewOf: builder.id }),
+			/read-only/i,
 		);
 	} finally {
 		await manager.close();

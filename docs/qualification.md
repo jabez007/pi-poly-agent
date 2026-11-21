@@ -18,6 +18,8 @@ Use a disposable, clean repository with a committed test fixture. Use the isolat
 
 Pi's [provider documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md) describes supported interactive login. This project uses its pinned provider implementation and adds stricter policy checks.
 
+For the worker scenarios, configure the optional `implementation-review` recipe first. Minimal profiles intentionally omit `/implement` and the example agents. Recipe selection and migration are described in [the platform guide](platform.md).
+
 ## Run the scenarios in Pi
 
 1. Authenticate through `/login` if needed. Record whether the chosen provider appears in `/model`, without recording credentials.
@@ -52,5 +54,7 @@ Inspect retained work before replacing a failed task. A generation may have chan
 | Z.AI coding plan | Pi SDK worker and sanitized authentication/quota/transport/context failures | Shared Pi/sandbox infrastructure only     | Not run                                                |
 | Claude SDK       | Mock SDK query and invocation guards                                        | No native Claude runtime execution        | Blocked pending authorization; workers disabled        |
 | Google ACP       | Official ACP SDK subprocess fixture, permissions and restoration fixtures   | Fixture runtime only                      | Not run; activation review required; workers forbidden |
+
+A local OpenAI-compatible instance has also been exercised through Pi's real transport against a loopback fake server. It uses no account and does not qualify a real hosted model or API billing agreement.
 
 The local startup observation is unauthenticated. Shared sandbox tests do not establish any provider's live behavior. Plans and fixtures never change these classifications automatically.

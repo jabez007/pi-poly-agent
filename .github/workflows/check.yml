@@ -16,5 +16,6 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run bootstrap
+      - run: npm run recipe -- minimal
       - run: npm run bootstrap
       - run: npm run validate

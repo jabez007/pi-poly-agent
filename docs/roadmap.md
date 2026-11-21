@@ -1,22 +1,22 @@
-# Roadmap after v0.3
+# Roadmap after v0.4
 
-v0.3 retains the Pi SDK worker architecture and adds durable recovery, a project host lease, exact-revision integration, worktree prerequisites, categorized failures, guided implementation/review, task selection, focused memory context, qualification plans, and optional terminal integration examples. It does not establish live provider compatibility.
+The platform now supports arbitrary JSON agents, intersected execution policy, registered provider instances, bounded declarative workflows, generic artifacts, optional context backends, trusted integration modules, and four recipes. It retains the v0.3 task controller, recovery, worktrees, sandbox, native Pi sessions, provider adapters, and account protections.
 
-## Priorities for v0.4
+## Highest-value next work
 
-1. Qualify Codex → Kimi and Codex → Z.AI with explicitly authorized accounts using the [manual checklist](qualification.md). Measure cancellation, credential refresh, model availability, approval behavior, and naturally occurring provider errors. Keep Claude authorization and Google direct-only runtime qualification separate.
-2. Qualify explicit Pi session continuation, including pending-tool detection and model-generation interruption. Until replay safety is established, keep fresh replacement workers and preserve original records. Improve recovery for missing worktrees, moved parent branches, interrupted acquisition guards, and interrupted Git integration without automatic resets.
-3. Extend preparation through small language adapters: offline package caches, Python dependency checks, and Go vendor validation. Keep installers opt-in, isolate cache contents, and avoid copying credentials. Current Node copying is intentionally strict and can refuse legitimate dependency fixtures; no code automatically runs an installer to work around refusal.
-4. Improve context with indexed source links, paraphrase deduplication, reviewed supersession of conflicting knowledge, and incremental checkpoints. Keep agent claims unverified and task state outside MemPalace.
-5. Add guided revision requests after review and richer scoped code search. Keep roles independent of models, explicit launch/integration approvals, bounded concurrency, and depth one.
+1. Qualify live Codex → Kimi and Codex → Z.AI using explicitly authorized accounts and the [manual checklist](qualification.md). Qualify real local/open-weight endpoints separately. Mock and loopback-fixture results do not establish live compatibility.
+2. Add explicit interrupted workflow-step continuation and safe SDK session continuation after pending-tool reconciliation. Preserve original runs and require approval; never infer that an uncertain generation can be replayed.
+3. Improve integration distribution with whole-package integrity, dependency manifests, resource provenance, and a dry-run configuration inspector. Entry-module checksums currently do not cover transitive imports. Keep project configuration declarative and trusted code explicit.
+4. Extend workspace preparation through small language adapters and approved offline caches. Python and Go provisioning remain manual. Consider additional workspace strategies only when their filesystem and Git contracts can be enforced.
+5. Improve review-driven revision recipes, artifact inspection, memory supersession, and source relevance without adding an autonomous planner or another task database.
 
-## Deliberate limits
+## Current limits
 
-- No authenticated provider tests have run for this milestone. Mock transport tests and local sandbox/TUI tests are separate evidence.
-- Worker private execution state is not resumed. Replacement is explicit, starts a new transcript, and preserves source/history.
-- Automatic retries, compaction, and provider switching remain disabled. A failed stream does not prove that a generation or tool action had no effects.
-- Managed host exclusion applies to the same project/profile on a local Linux filesystem. It is not a distributed lock or a guard against unmanaged programs and manual Git changes.
-- Python and Go preparation reports prerequisites; it does not provision virtual environments, external module caches, or language runtimes.
-- Reviewers inspect source and diffs with read-only tools. Researchers inspect local code and supplied documentation, without web tools.
-- Memory retrieval is optional and bounded. It does not automatically verify agent findings or reconcile contradictions.
-- Custom API/open-weight endpoints remain unconfigured pending separate billing and credential policies. Google consumer ACP workers remain forbidden, and Claude subscription workers remain blocked.
+- All subscription providers remain live-unqualified. Claude subscription workers remain blocked, and Google consumer ACP remains direct-only.
+- Task recovery uses approved replacement workers. Workflow restart preserves records but does not continue steps automatically.
+- Graphs are bounded DAGs with text input and explicit dependencies. There are no loops, recursive delegation, expression evaluation, unattended gates, or integration steps that silently apply changes.
+- All tasks use Git worktrees. Read-only filesystem tools cannot write; executable tests require effective write permission, single-use approval, and Bubblewrap without networking.
+- Skills and worker extensions contribute approved instructions. Arbitrary Pi hooks and subprocess access are unavailable inside workers. Trusted custom tool and adapter code has application-process authority and must be reviewed.
+- Native compatible-endpoint configuration uses static model IDs. Routing is exact or requires one unambiguous capability match. There is no model hosting, adaptive routing, subscription proxy, or billing fallback.
+- MemPalace remains optional. Generic custom-backend writes are not wired to automatic checkpointing. Task events stay in local records rather than MemPalace logstream.
+- Automatic retries and compaction remain disabled. Local host exclusion is not a distributed lock or protection against unmanaged programs and manual Git operations.

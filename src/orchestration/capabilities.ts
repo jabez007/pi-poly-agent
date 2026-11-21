@@ -13,7 +13,7 @@ export interface Capabilities {
 	editing: boolean;
 	nativeSubagents: boolean;
 	handoffs: boolean;
-	billing: "subscription" | "coding-plan" | "locked";
+	billing: "subscription" | "coding-plan" | "locked" | "api" | "local";
 }
 
 export function providerCapabilities(provider: string, policy: Policy): Capabilities {

@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"compatibility": false,
+	"agents": {},
+	"workflows": {},
+	"context": ["native"],
+	"ui": {
+		"status": false,
+		"notifications": false
+	}
+}

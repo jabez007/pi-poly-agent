@@ -187,7 +187,7 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 		name: "review_diff",
 		label: "Review source diff",
 		description:
-			"Read the implementation diff against the builder's original base. Does not modify files.",
+			"Read the implementation diff against the inspected task's original base. Does not modify files.",
 		parameters: Type.Object({ path: Type.String() }),
 		execute: async (_id, args: any) => {
 			scopedPath(cwd, args.path);

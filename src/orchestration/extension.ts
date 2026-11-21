@@ -1,3 +1,10 @@
+import { agentPolicy, effectivePolicy, type ExecutionPolicy } from "../platform/contracts.ts";
+import { existsSync } from "node:fs";
+import { loadPlatform } from "../platform/config.ts";
+import { ProviderRegistry } from "../platform/providers.ts";
+import { WorkflowEngine } from "../platform/workflows.ts";
+import { emptyResources } from "../platform/resources.ts";
+import type { WorkerResources } from "../platform/contracts.ts";
 import { taskContext } from "./context.ts";
 import { taskLine, formatTask } from "./presentation.ts";
 import { worktreeReadiness, importNodeDependencies } from "./preparation.ts";
@@ -6,8 +13,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPolicy } from "../profile.ts";
 import { assertNoSecrets, projectIdentity } from "../memory.ts";
-import { MANAGED_PROVIDERS, assertDelegation, providerCapabilities } from "./capabilities.ts";
-import { loadOrchestration, type Role } from "./roles.ts";
+import { type Role } from "./roles.ts";
 import { TaskManager, type Dispatch, type Task } from "./tasks.ts";
 import type { TaskRunner } from "./tasks.ts";
 import { approvedTest, type ApproveTest } from "./tools.ts";
@@ -17,33 +23,57 @@ import { cleanupWorkspace, workspaceDiff, git } from "./worktrees.ts";
 export function registerOrchestration(
 	pi: ExtensionAPI,
 	profile: string,
-	contextPacket: (brief?: string) => string | Promise<string>,
-	makeRunner: (approve: ApproveTest) => TaskRunner = (approve) => createPiRunner(profile, approve),
+	contextPacket: (brief?: string, sources?: string[]) => string | Promise<string>,
+	makeRunner?: (approve: ApproveTest) => TaskRunner,
+	integrations: { providers?: ProviderRegistry; resources?: WorkerResources } = {},
 ): void {
 	let manager: TaskManager | undefined;
+	let workflows: WorkflowEngine | undefined;
+	const registry = integrations.providers || new ProviderRegistry(() => loadPolicy(profile));
+	const resources = integrations.resources || emptyResources();
+	const registered = new Set(registry.list().map((p) => p.id));
 	let current: ExtensionContext;
 	let stopped = false;
 	let generation = 0;
 	const published = new Set<string>();
 	const preparations = new Set<AbortController>();
-	const config = () => loadOrchestration(profile);
+	const config = () => loadPlatform(profile, current?.cwd);
+	function configure(): void {
+		for (const instance of config().providers)
+			if (!registered.has(instance.id)) {
+				registry.register(instance);
+				registered.add(instance.id);
+			}
+	}
+	function inspectionAgent(): Role {
+		const role =
+			config().agents.find((a) => a.name === "reviewer") ||
+			config().agents.find((a) => a.tags?.includes("inspection") && !a.editing);
+		if (!role)
+			throw new Error(
+				"No inspection agent configured. Use /workflow or define an agent tagged inspection.",
+			);
+		return role;
+	}
 	function publish(task: Task): void {
 		const active = manager ? manager.list().filter((t) => t.status === "running") : [];
-		current.ui.setStatus(
-			"poly-tasks",
-			active.length
-				? active
-						.slice(0, 4)
-						.map((t) => `${t.id.slice(0, 8)} ${t.role.name}: ${t.progress}`)
-						.join(" | ")
-				: "Workers idle | /tasks",
-		);
+		if (config().ui.status)
+			current.ui.setStatus(
+				"poly-tasks",
+				active.length
+					? active
+							.slice(0, 4)
+							.map((t) => `${t.id.slice(0, 8)} ${t.role.name}: ${t.progress}`)
+							.join(" | ")
+					: "Workers idle | /tasks",
+			);
 		if (task.status === "running" || stopped || published.has(task.id)) return;
 		published.add(task.id);
-		current.ui.notify(
-			`${task.role.name} ${task.id.slice(0, 8)} ${task.status}${task.reviewOf ? "; review available" : ""}. ${task.integration?.state === "awaiting_review" ? "Independent review required." : ""} /tasks`,
-			task.status === "completed" ? "info" : "warning",
-		);
+		if (config().ui.notifications)
+			current.ui.notify(
+				`${task.role.name} ${task.id.slice(0, 8)} ${task.status}${task.reviewOf ? "; review available" : ""}. ${task.integration?.state === "awaiting_review" ? "Independent review required." : ""} /tasks`,
+				task.status === "completed" ? "info" : "warning",
+			);
 		pi.appendEntry("poly-task-complete", task);
 		pi.sendMessage(
 			{
@@ -62,13 +92,17 @@ export function registerOrchestration(
 	}
 	function tasks(ctx: ExtensionContext): TaskManager {
 		current = ctx;
+		configure();
 		if (!manager) {
 			const project = projectIdentity(ctx.cwd);
 			manager = new TaskManager(
 				join(profile, "tasks", project.wing),
 				ctx.cwd,
 				() => loadPolicy(profile),
-				makeRunner(async (command, cwd, signal) => {
+				(
+					makeRunner ||
+					((approve) => createPiRunner(profile, approve, undefined, registry, resources))
+				)(async (command, cwd, signal) => {
 					if (signal.aborted || !current.hasUI || current.mode !== "tui") return false;
 					return current.ui.confirm(
 						"Run this test once in an isolated sandbox?",
@@ -79,6 +113,8 @@ export function registerOrchestration(
 				config().timeoutMs,
 				publish,
 				prepareWorker,
+				registry,
+				config().policy,
 			);
 			for (const notice of manager.diagnostics) ctx.ui.notify(notice, "warning");
 			const recoverable = manager
@@ -107,7 +143,7 @@ export function registerOrchestration(
 	async function prepareExisting(ctx: ExtensionContext, task: Task, command = ""): Promise<void> {
 		if (!ctx.hasUI || ctx.mode !== "tui" || task.status === "running")
 			throw new Error("Preparation requires an inactive task and interactive approval");
-		if (!task.role.editing) throw new Error("Preparation commands require an editing task");
+		assertPreparation(task, command, config().policy);
 		if (command) {
 			const controller = new AbortController();
 			preparations.add(controller);
@@ -150,33 +186,6 @@ export function registerOrchestration(
 		const choice = await modelChoice(ctx, task.role);
 		if (choice) await launch(ctx, task.role, task.brief, choice, task.reviewOf, task.id);
 	}
-	async function offerReview(ctx: ExtensionContext, task: Task): Promise<void> {
-		const epoch = generation;
-		const host = manager!;
-		const completed = await host.wait(task.id);
-		if (epoch !== generation || stopped || completed.status !== "completed") return;
-		if (
-			!(await ctx.ui.confirm(
-				"Builder complete. Launch independent review?",
-				`${formatTask(completed)}\nReviewer: ${task.workflowReviewModel}`,
-			)) ||
-			stopped ||
-			epoch !== generation
-		)
-			return;
-		const role = config().roles.find((r) => r.name === "reviewer")!;
-		const review = await launch(
-			ctx,
-			role,
-			`Independently review ${completed.id} against acceptance criteria: ${completed.brief}`,
-			task.workflowReviewModel!,
-			task.id,
-		);
-		if (review) {
-			await host.wait(review.id);
-			if (!stopped && epoch === generation) await taskActions(ctx, host.get(task.id));
-		}
-	}
 	async function taskActions(ctx: ExtensionContext, task: Task): Promise<void> {
 		ctx.ui.notify(formatTask(task), "info");
 		const actions = ["Inspect diff", "Leave for later"];
@@ -192,7 +201,7 @@ export function registerOrchestration(
 		if (choice === "Cancel worker") await manager!.cancel(task.id);
 		if (choice === "Inspect review and integrate") await integrateTask(ctx, task, manager!);
 		if (choice === "Review implementation") {
-			const role = config().roles.find((r) => r.name === "reviewer")!;
+			const role = inspectionAgent();
 			const model = await modelChoice(ctx, role, task.workflowReviewModel);
 			if (model)
 				await launch(ctx, role, `Independently review ${task.id}: ${task.brief}`, model, task.id);
@@ -203,10 +212,24 @@ export function registerOrchestration(
 		role: Role,
 		explicit?: string,
 	): Promise<string | undefined> {
-		if (explicit) return explicit;
+		configure();
+		if (explicit || role.model) {
+			const model = explicit || role.model!;
+			if (role.model && explicit && model !== role.model)
+				throw new Error("Agent requires its configured exact model");
+			registry.assert(model.split("/")[0], 1);
+			return model;
+		}
+		if (role.selection) return registry.resolve(role.selection, ctx.modelRegistry.getAvailable());
 		const available = ctx.modelRegistry
 			.getAvailable()
-			.filter((model) => providerCapabilities(model.provider, loadPolicy(profile)).delegation)
+			.filter((model) => {
+				try {
+					return registry.capabilities(model.provider).delegation;
+				} catch {
+					return false;
+				}
+			})
 			.map((model) => `${model.provider}/${model.id}`);
 		if (role.model && available.includes(role.model))
 			available.unshift(...available.splice(available.indexOf(role.model), 1));
@@ -227,11 +250,16 @@ export function registerOrchestration(
 		const slash = model.indexOf("/");
 		if (slash < 1) throw new Error("Choose provider/model explicitly");
 		const provider = model.slice(0, slash);
-		assertDelegation(provider, loadPolicy(profile), 1);
+		registry.assert(provider, 1);
 		const list = tasks(ctx);
 		const reference = reviewOf || replacementOf;
 		const previous = reference ? list.get(reference) : undefined;
-		const context = taskContext(await contextPacket(brief), previous);
+		const execution = effectivePolicy(agentPolicy(role), config().policy);
+		const context = taskContext(
+			await contextPacket(brief, role.context),
+			previous,
+			execution.contextBudget,
+		);
 		assertNoSecrets({ brief, context });
 		const draft = await ctx.ui.editor(
 			"Review focused task context. No parent transcript is inherited.",
@@ -244,7 +272,7 @@ export function registerOrchestration(
 				`Launch ${role.name} with ${model}?`,
 				replacementOf
 					? "Create a NEW worker from preserved source changes. This captures a task-only snapshot, retains the original task, and does not restore provider-private execution state."
-					: "Independent session, isolated worktree, depth 1. Test commands require separate approval. Provider plan usage applies.",
+					: `Independent session, isolated worktree. Permissions: ${execution.permissions.join(", ")}. Tools: ${execution.tools.join(", ")}. Test commands require separate approval. Provider plan usage applies.`,
 			))
 		)
 			return;
@@ -266,11 +294,17 @@ export function registerOrchestration(
 		return task;
 	}
 	async function delegate(args: string, ctx: ExtensionContext): Promise<void> {
+		current = ctx;
+		configure();
 		const [name, model, ...words] = args.trim().split(/\s+/);
-		const chosenRole = config().roles.find((r) => r.name === name);
+		const chosenRole = config().agents.find((r) => r.name === name);
 		if (!chosenRole) {
 			ctx.ui.notify(
-				"Usage: /delegate planner|builder|reviewer|researcher [provider/model] task brief",
+				`Usage: /delegate AGENT [instance/model] task brief. Agents: ${
+					config()
+						.agents.map((a) => a.name)
+						.join(", ") || "none configured"
+				}`,
 				"info",
 			);
 			return;
@@ -286,13 +320,14 @@ export function registerOrchestration(
 	pi.registerCommand("agents", {
 		description: "Show roles and provider delegation capabilities",
 		handler: async (args, ctx) => {
-			const rows = MANAGED_PROVIDERS.map((id) => ({
-				provider: id,
-				...providerCapabilities(id, loadPolicy(profile)),
-			}));
+			current = ctx;
+			configure();
+			const rows = registry
+				.list()
+				.map((instance) => ({ provider: instance.id, ...registry.capabilities(instance.id) }));
 			ctx.ui.notify(
 				`${config()
-					.roles.map(
+					.agents.map(
 						(r) =>
 							`${r.name}: ${r.editing ? "isolated editing" : "read only"}${r.model ? ` (${r.model})` : ""}`,
 					)
@@ -318,55 +353,123 @@ export function registerOrchestration(
 			if (selected) await taskActions(ctx, all[choices.indexOf(selected)]);
 		},
 	});
-	pi.registerCommand("implement", {
-		description: "Guided implementation followed by a different model's independent review",
-		handler: async (args, ctx) => {
-			if (!ctx.hasUI || ctx.mode !== "tui")
-				throw new Error("Workflow requires interactive authorization");
-			const brief =
-				args.trim() || (await ctx.ui.input("Implementation objective and acceptance criteria"));
-			if (!brief) return;
-			const roles = config().roles;
-			const builder = await modelChoice(ctx, roles.find((r) => r.name === "builder")!);
-			const reviewer = await modelChoice(ctx, roles.find((r) => r.name === "reviewer")!);
-			if (!builder || !reviewer) return;
-			if (builder === reviewer)
-				throw new Error("Choose a different provider/model for independent guided review");
-			const task = await launch(
-				ctx,
-				roles.find((r) => r.name === "builder")!,
-				brief,
-				builder,
-				undefined,
-				undefined,
-				reviewer,
+	async function workflow(args: string, ctx: ExtensionContext): Promise<void> {
+		if (!ctx.hasUI || ctx.mode !== "tui")
+			throw new Error("Workflow requires interactive authorization");
+		current = ctx;
+		const [name, ...words] = args.trim().split(/\s+/);
+		const definition = config().workflows.find((w) => w.id === name);
+		if (!definition) {
+			ctx.ui.notify(
+				`Workflows: ${
+					config()
+						.workflows.map((w) => w.id)
+						.join(", ") || "none configured"
+				}`,
+				"info",
 			);
-			if (task)
-				void offerReview(ctx, task).catch(() =>
-					ctx.ui.notify(
-						"Guided review stopped. Use /review or /tasks; results remain preserved.",
-						"warning",
-					),
-				);
-		},
+			return;
+		}
+		const brief =
+			words.join(" ") || (await ctx.ui.input("Workflow objective and acceptance criteria"));
+		if (!brief) return;
+		const engine = workflowHost(ctx);
+		const run = engine.start(definition, brief, ctx.sessionManager.getSessionId());
+		const epoch = generation;
+		void engine
+			.wait(run.id)
+			.then(async (completed) => {
+				if (stopped || epoch !== generation || completed.status !== "completed") return;
+				const editing = Object.values(completed.steps)
+					.map((s) => (s.task ? manager!.get(s.task) : undefined))
+					.find((t) => t?.role.editing);
+				if (editing) await taskActions(ctx, editing);
+			})
+			.catch(() =>
+				ctx.ui.notify("Workflow results retained. Use /tasks to inspect them.", "warning"),
+			);
+		ctx.ui.notify(`Workflow ${run.id} started. Each step requires approval.`, "info");
+	}
+	function workflowHost(ctx: ExtensionContext): WorkflowEngine {
+		const host = tasks(ctx);
+		return (workflows ??= new WorkflowEngine(
+			join(profile, "tasks", projectIdentity(ctx.cwd).wing, "workflows"),
+			host,
+			config().agents,
+			{
+				model: (agent, model) => modelChoice(ctx, agent, model),
+				context: async (objective, agent) => await contextPacket(objective, agent.context),
+				approve: async (step, input, signal) => {
+					const epoch = generation;
+					const previous = input.reviewOf ? host.get(input.reviewOf) : undefined;
+					const edited = await ctx.ui.editor(
+						"Review focused task context. No parent transcript is inherited.",
+						JSON.stringify(
+							{ brief: input.brief, context: taskContext(input.context || "", previous) },
+							null,
+							2,
+						),
+					);
+					if (!edited || signal.aborted) return false;
+					const packet = parseTaskPacket(edited);
+					const approved = await ctx.ui.confirm(
+						step.approval || `Launch ${input.role.name} with ${input.provider}/${input.model}?`,
+						`Independent authorized worker, isolated worktree. Effective permissions: ${effectivePolicy(agentPolicy(input.role), config().policy).permissions.join(", ")}. Test commands require separate approval.`,
+					);
+					return approved && !signal.aborted && epoch === generation && !stopped
+						? { ...input, ...packet }
+						: false;
+				},
+				changed: (run) => {
+					if (
+						config().ui.notifications &&
+						["completed", "failed", "interrupted"].includes(run.status)
+					)
+						ctx.ui.notify(
+							`Workflow ${run.id.slice(0, 8)} ${run.status}. /tasks and /workflow-runs show preserved results.`,
+							"info",
+						);
+				},
+			},
+			config().concurrency,
+		));
+	}
+	pi.registerCommand("workflow", {
+		description: "Run any configured sequential or parallel recipe",
+		handler: workflow,
 	});
-	pi.registerCommand("review", {
-		description: "Launch an independent read-only review of a completed builder",
+	pi.registerCommand("workflow-runs", {
+		description: "Inspect or cancel durable workflow runs",
 		handler: async (args, ctx) => {
-			const [id, explicit] = args.trim().split(/\s+/);
-			const builder = tasks(ctx).get(id);
-			const role = config().roles.find((r) => r.name === "reviewer")!;
-			const choice = await modelChoice(ctx, role, explicit);
-			if (choice)
-				await launch(
-					ctx,
-					role,
-					`Independently review task ${builder.id}. Inspect changed files against acceptance criteria: ${builder.brief}. Report defects with paths and lines, tests missing, and remaining risks.`,
-					choice,
-					builder.id,
-				);
+			const [id, action] = args.trim().split(/\s+/);
+			const engine = workflowHost(ctx);
+			if (id && action === "cancel") await engine.cancel(id);
+			ctx.ui.notify(JSON.stringify(engine.list(), null, 2), "info");
 		},
 	});
+	if (config().workflows.some((w) => w.id === "implementation-review"))
+		pi.registerCommand("implement", {
+			description: "Compatibility alias for /workflow implementation-review",
+			handler: (args, ctx) => workflow(`implementation-review ${args}`, ctx),
+		});
+	if (config().agents.some((a) => a.name === "reviewer" || a.tags?.includes("inspection")))
+		pi.registerCommand("review", {
+			description: "Launch an independent read-only review of a completed editing task",
+			handler: async (args, ctx) => {
+				const [id, explicit] = args.trim().split(/\s+/);
+				const builder = tasks(ctx).get(id);
+				const role = inspectionAgent();
+				const choice = await modelChoice(ctx, role, explicit);
+				if (choice)
+					await launch(
+						ctx,
+						role,
+						`Independently review task ${builder.id}. Inspect changed files against acceptance criteria: ${builder.brief}. Report defects with paths and lines, tests missing, and remaining risks.`,
+						choice,
+						builder.id,
+					);
+			},
+		});
 	pi.registerCommand("task", {
 		description: "Inspect, cancel, diff, integrate, or clean a task",
 		handler: async (args, ctx) => {
@@ -417,19 +520,16 @@ export function registerOrchestration(
 		description:
 			"Request a depth-one independent task. Requires interactive user approval and an authorized provider/model. Google ACP and Claude subscription workers are forbidden.",
 		parameters: Type.Object({
-			role: Type.Union([
-				Type.Literal("planner"),
-				Type.Literal("builder"),
-				Type.Literal("reviewer"),
-				Type.Literal("researcher"),
-			]),
+			role: Type.String(),
 			model: Type.String(),
 			brief: Type.String({ maxLength: 6000 }),
 			reviewOf: Type.Optional(Type.String()),
 		}),
 		execute: async (_id, args: any, _signal, _update, ctx) => {
-			assertDelegation(ctx.model?.provider || "", loadPolicy(profile), 1);
-			const role = config().roles.find((r) => r.name === args.role);
+			current = ctx;
+			configure();
+			registry.assert(ctx.model?.provider || "", 1);
+			const role = config().agents.find((r) => r.name === args.role);
 			if (!role) throw new Error("Unknown role");
 			const task = await launch(ctx, role, args.brief, args.model, args.reviewOf);
 			return {
@@ -460,11 +560,21 @@ export function registerOrchestration(
 		},
 	});
 	pi.on("session_start", async (_event, ctx) => {
-		if (ctx.hasUI && ctx.mode === "tui") tasks(ctx);
+		current = ctx;
+		if (
+			ctx.hasUI &&
+			ctx.mode === "tui" &&
+			(config().agents.length || existsSync(join(profile, "tasks", projectIdentity(ctx.cwd).wing)))
+		) {
+			tasks(ctx);
+			workflowHost(ctx);
+		}
 	});
 	pi.on("session_before_switch", async () => {
 		generation++;
 		for (const controller of preparations) controller.abort();
+		await workflows?.close();
+		workflows = undefined;
 		if (manager) {
 			stopped = true;
 			await manager.close();
@@ -476,6 +586,7 @@ export function registerOrchestration(
 		generation++;
 		for (const controller of preparations) controller.abort();
 		stopped = true;
+		await workflows?.close();
 		await manager?.close();
 	});
 }
@@ -486,13 +597,12 @@ async function integrateTask(
 	manager: TaskManager,
 ): Promise<void> {
 	if (task.status !== "completed" || !task.role.editing || !task.revision)
-		throw new Error("Only completed builder snapshots can be integrated");
+		throw new Error("Only completed editing task snapshots can be integrated");
 	const reviews = manager
 		.list()
 		.filter(
 			(r) =>
 				r.reviewOf === task.id &&
-				r.role.name === "reviewer" &&
 				!r.role.editing &&
 				r.status === "completed" &&
 				(r.reviewRevision || r.workspace.base) === task.revision,
@@ -502,9 +612,7 @@ async function integrateTask(
 		git(task.workspace.path, ["status", "--porcelain"]) ||
 		git(task.workspace.path, ["rev-parse", "HEAD"]) !== task.revision
 	)
-		throw new Error(
-			"Builder worktree changed after review; request a new review before integration",
-		);
+		throw new Error("Task worktree changed after review; request a new review before integration");
 	const diff = workspaceDiff(task.workspace).diff;
 	ctx.ui.notify(
 		`${diff}\n\nReview findings:\n${reviews.map((r) => JSON.stringify(r.result)).join("\n")}`,
@@ -514,7 +622,7 @@ async function integrateTask(
 		ctx.hasUI &&
 		ctx.mode === "tui" &&
 		(await ctx.ui.confirm(
-			"Integrate the reviewed builder snapshot?",
+			"Integrate the reviewed task snapshot?",
 			"Cherry-pick into the clean, unchanged parent branch. Review all findings and the diff first.",
 		))
 	)
@@ -531,4 +639,19 @@ function parseTaskPacket(text: string): { brief: string; context: string } {
 	} catch {
 		throw new Error("Invalid or sensitive task brief; values withheld");
 	}
+}
+
+function assertPreparation(
+	task: Task,
+	command: string,
+	restrictions: Partial<ExecutionPolicy>,
+): void {
+	const permissions = effectivePolicy(
+		agentPolicy(task.role),
+		task.effectivePolicy || {},
+		restrictions,
+	).permissions;
+	if (!permissions.includes("write")) throw new Error("Preparation requires an editing task");
+	if (command && (!permissions.includes("test") || !permissions.includes("read")))
+		throw new Error("Preparation command requires effective read, write and test permissions");
 }

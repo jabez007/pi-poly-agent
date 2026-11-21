@@ -1,0 +1,70 @@
+{
+	"version": 1,
+	"compatibility": false,
+	"agents": {
+		"coordinator": {
+			"description": "",
+			"instructions": "Analyze the objective and identify constraints and acceptance criteria. Produce a bounded plan.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		},
+		"implementer": {
+			"description": "",
+			"instructions": "Implement the approved brief in isolation. Run approved tests and record evidence.",
+			"policy": {
+				"permissions": ["read", "write", "test"],
+				"tools": ["read", "write", "edit", "run_test", "review_diff"]
+			}
+		},
+		"quality-specialist": {
+			"description": "",
+			"instructions": "Independently inspect changes for correctness and coverage. Cite source lines.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		},
+		"documentation-specialist": {
+			"description": "",
+			"instructions": "Inspect documentation and code conventions. Report evidence and proposed corrections.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		}
+	},
+	"workflows": {
+		"team-change": {
+			"steps": [
+				{
+					"id": "plan",
+					"agent": "coordinator",
+					"objective": "Plan this objective: {{input}}"
+				},
+				{
+					"id": "docs",
+					"agent": "documentation-specialist",
+					"objective": "Inspect documentation for {{input}}"
+				},
+				{
+					"id": "change",
+					"agent": "implementer",
+					"objective": "{{input}}",
+					"needs": ["plan", "docs"],
+					"contextFrom": ["plan", "docs"]
+				},
+				{
+					"id": "quality",
+					"agent": "quality-specialist",
+					"objective": "Inspect {{input}}",
+					"needs": ["change"],
+					"inspect": "change",
+					"contextFrom": ["change"],
+					"approval": "Approve independent quality inspection?"
+				}
+			]
+		}
+	}
+}

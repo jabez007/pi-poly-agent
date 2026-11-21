@@ -1,6 +1,13 @@
+import {
+	agentPolicy,
+	effectivePolicy,
+	type ExecutionPolicy,
+	type Artifact,
+} from "../platform/contracts.ts";
+import { ProviderRegistry } from "../platform/providers.ts";
 import { atomicRecord, acquireHost } from "./storage.ts";
 import { safeFailure, type FailureCode } from "./errors.ts";
-import { providerCapabilities, type Capabilities } from "./capabilities.ts";
+import { type Capabilities } from "./capabilities.ts";
 import { worktreeReadiness, type Prerequisite } from "./preparation.ts";
 import { untilCanceled } from "./cancellation.ts";
 import { randomUUID } from "node:crypto";
@@ -9,7 +16,6 @@ import { join, resolve } from "node:path";
 import { assertEnvironment, type Policy } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
 import { assertSafeProfile } from "../profile.ts";
-import { assertDelegation } from "./capabilities.ts";
 import type { Role } from "./roles.ts";
 import {
 	createWorkspace,
@@ -36,6 +42,7 @@ export interface Finding {
 	severity: "info" | "warning" | "error";
 }
 export interface TaskResult {
+	artifacts?: Artifact[];
 	summary: string;
 	files: string[];
 	tests: string[];
@@ -48,7 +55,7 @@ export interface Task {
 	role: Role;
 	provider: string;
 	model: string;
-	depth: 1;
+	depth: number;
 	brief: string;
 	context: string;
 	status: TaskStatus;
@@ -61,6 +68,8 @@ export interface Task {
 	reviewOf?: string;
 	reviewBase?: string;
 	progress: string;
+	effectivePolicy?: ExecutionPolicy;
+	artifacts?: Artifact[];
 	project?: string;
 	createdAt?: string;
 	updatedAt?: string;
@@ -99,6 +108,7 @@ export interface Dispatch {
 	reviewOf?: string;
 	workflowReviewModel?: string;
 	replacementOf?: string;
+	policy?: Partial<ExecutionPolicy>;
 }
 
 export function validateTaskResult(value: unknown): TaskResult {
@@ -128,7 +138,31 @@ export function validateTaskResult(value: unknown): TaskResult {
 		tests: r.tests,
 		findings: r.findings,
 		questions: r.questions,
+		artifacts: validateArtifacts(r.artifacts),
 	};
+}
+
+function validateArtifacts(artifacts: Artifact[] | undefined): Artifact[] {
+	if (artifacts === undefined) return [];
+	if (!Array.isArray(artifacts) || artifacts.length > 16) throw new Error("Invalid task artifacts");
+	return artifacts.map((artifact) => {
+		if (
+			!artifact ||
+			!/^[a-z][a-z0-9-]{0,63}$/.test(artifact.kind) ||
+			typeof artifact.content !== "string" ||
+			typeof artifact.source !== "string" ||
+			!artifact.source
+		)
+			throw new Error("Artifact requires a kind, content and source");
+		if (["summary", "findings", "tests", "diff"].includes(artifact.kind))
+			throw new Error("Artifact kind reserved for application output");
+		return {
+			kind: artifact.kind,
+			content: artifact.content,
+			source: artifact.source,
+			certainty: "claim",
+		};
+	});
 }
 
 export class TaskManager {
@@ -146,6 +180,8 @@ export class TaskManager {
 		private timeoutMs = 900000,
 		private changed: (task: Task) => void = () => {},
 		private prepare: (task: Task, signal: AbortSignal) => Promise<void> = async () => {},
+		private registry = new ProviderRegistry(policy),
+		private restrictions: Partial<ExecutionPolicy> = {},
 	) {
 		assertSafeProfile(directory);
 		if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4)
@@ -229,9 +265,11 @@ export class TaskManager {
 	dispatch(input: Dispatch): Task {
 		if (this.closed) throw new Error("Task host is closed");
 		assertEnvironment(process.env);
-		assertDelegation(input.provider, this.policy(), input.depth ?? 1);
+		this.registry.assert(input.provider, input.depth ?? 1);
+		input = this.admit(input);
 		if (this.active.size >= this.concurrency) throw new Error("Task concurrency limit reached");
 		validateDispatch(input);
+
 		const review = this.reviewTarget(input);
 		const task = this.createTask(input, review);
 		const id = task.id;
@@ -248,6 +286,34 @@ export class TaskManager {
 		});
 		return structuredClone(task);
 	}
+	private admit(input: Dispatch): Dispatch {
+		const execution = effectivePolicy(
+			agentPolicy(input.role),
+			this.restrictions,
+			input.policy || {},
+		);
+		if ((input.context || "").length > execution.contextBudget)
+			throw new Error("Context exceeds effective agent budget");
+		const capabilities = this.registry.capabilities(input.provider);
+		assertAgentModel(input, capabilities);
+		if (execution.permissions.includes("write") && !capabilities.editing)
+			throw new Error("Provider does not support editing");
+		if (
+			!capabilities.concurrent &&
+			[...this.active.keys()].some((id) => this.tasks.get(id)?.provider === input.provider)
+		)
+			throw new Error("Provider does not permit concurrent sessions");
+		if (!capabilities.tools && execution.tools.length)
+			throw new Error("Provider does not support tools");
+		if (this.active.size >= execution.concurrency)
+			throw new Error("Agent concurrency limit reached");
+		return {
+			...input,
+			role: { ...input.role, editing: execution.permissions.includes("write") },
+			policy: execution,
+		};
+	}
+
 	private createTask(input: Dispatch, review?: Task): Task {
 		const id = randomUUID();
 		const replacement = input.replacementOf
@@ -277,7 +343,8 @@ export class TaskManager {
 						project: planned.root,
 						createdAt: new Date().toISOString(),
 						startedAt: new Date().toISOString(),
-						capabilities: providerCapabilities(input.provider, this.policy()),
+						capabilities: this.registry.capabilities(input.provider),
+						effectivePolicy: input.policy as ExecutionPolicy,
 						progress: "Preparing isolated Pi session",
 					};
 					this.tasks.set(id, task);
@@ -308,20 +375,23 @@ export class TaskManager {
 		if (
 			review.status !== "completed" ||
 			!review.revision ||
-			input.role.name !== "reviewer" ||
-			input.role.editing
+			input.role.editing ||
+			!input.policy?.permissions?.includes("read")
 		)
-			throw new Error("Review requires a completed snapshot and the read-only reviewer role");
+			throw new Error("Review requires a completed snapshot and a read-only inspection agent");
 		assertIntegrationSnapshot(review);
 		return review;
 	}
 	private async execute(task: Task, controller: AbortController): Promise<void> {
-		const timer = setTimeout(() => {
-			task.status = "timed_out";
-			controller.abort();
-		}, this.timeoutMs);
+		const timer = setTimeout(
+			() => {
+				task.status = "timed_out";
+				controller.abort();
+			},
+			Math.min(this.timeoutMs, task.effectivePolicy?.timeoutMs ?? this.timeoutMs),
+		);
 		try {
-			assertDelegation(task.provider, this.policy(), task.depth);
+			this.registry.assert(task.provider, task.depth);
 			await untilCanceled(
 				this.prepare(structuredClone(task), controller.signal),
 				controller.signal,
@@ -355,21 +425,7 @@ export class TaskManager {
 				controller.signal,
 			);
 			if (controller.signal.aborted) return;
-			task.result = validateTaskResult(result);
-			this.persist(task, false);
-			const changes = workspaceDiff(task.workspace);
-			assertNoSecrets(changes);
-			if (!task.role.editing && changes.files.length)
-				throw new Error("Read-only worker modified files");
-			task.result.files = changes.files;
-			if (task.role.editing) task.revision = snapshotWorkspace(task.workspace);
-			task.status = "completed";
-			if (task.revision) task.integration = { state: "awaiting_review", revision: task.revision };
-			if (task.reviewOf) {
-				const builder = this.tasks.get(task.reviewOf)!;
-				builder.integration = { state: "ready", revision: task.reviewRevision! };
-				this.persist(builder, false);
-			}
+			this.complete(task, result);
 		} catch (error) {
 			if (!controller.signal.aborted) {
 				task.status = "failed";
@@ -385,6 +441,48 @@ export class TaskManager {
 			this.persist(task);
 		}
 	}
+	private complete(task: Task, result: TaskResult): void {
+		task.result = validateTaskResult(result);
+		this.persist(task, false);
+		const changes = workspaceDiff(task.workspace);
+		assertNoSecrets(changes);
+		if (!task.role.editing && changes.files.length)
+			throw new Error("Read-only worker modified files");
+		task.result.files = changes.files;
+		if (task.role.editing) task.revision = snapshotWorkspace(task.workspace);
+		task.artifacts = [
+			...(task.result.artifacts || []),
+			{ kind: "summary", content: task.result.summary, source: task.id, certainty: "claim" },
+			{
+				kind: "findings",
+				content: JSON.stringify(task.result.findings),
+				source: task.id,
+				certainty: "claim",
+			},
+			{
+				kind: "tests",
+				content: JSON.stringify(task.result.tests),
+				source: task.id,
+				certainty: "observed",
+			},
+			{
+				kind: "diff",
+				content: changes.diff,
+				source: task.revision || task.workspace.base,
+				certainty: "observed",
+			},
+		];
+		if (task.role.outputs?.some((kind) => !task.artifacts!.some((a) => a.kind === kind)))
+			throw new Error("Missing required agent artifact");
+		task.status = "completed";
+		if (task.revision) task.integration = { state: "awaiting_review", revision: task.revision };
+		if (task.reviewOf) {
+			const inspected = this.tasks.get(task.reviewOf)!;
+			inspected.integration = { state: "ready", revision: task.reviewRevision! };
+			this.persist(inspected, false);
+		}
+	}
+
 	async wait(id: string): Promise<Task> {
 		await this.active.get(id)?.done;
 		return this.get(id);
@@ -433,13 +531,12 @@ export class TaskManager {
 	integrate(id: string): Task {
 		const task = this.tasks.get(id);
 		if (!task || task.status !== "completed" || !task.role.editing || !task.revision)
-			throw new Error("Only completed builder snapshots can be integrated");
+			throw new Error("Only completed editing snapshots can be integrated");
 		if (task.integration?.state === "integrated") throw new Error("Task is already integrated");
 		const review = this.list().find(
 			(r) =>
 				r.reviewOf === id &&
 				r.status === "completed" &&
-				r.role.name === "reviewer" &&
 				!r.role.editing &&
 				(r.reviewRevision || r.workspace.base) === task.revision,
 		);
@@ -467,9 +564,19 @@ export class TaskManager {
 	}
 }
 
+function assertAgentModel(input: Dispatch, capabilities: Capabilities): void {
+	if (input.role.model && input.role.model !== `${input.provider}/${input.model}`)
+		throw new Error("Agent requires its configured exact model");
+	const selection = input.role.selection;
+	if (selection?.instance && selection.instance !== input.provider)
+		throw new Error("Agent provider selection constraint was not satisfied");
+	if (selection?.requires?.some((key) => (capabilities as any)[key] !== true))
+		throw new Error("Required agent provider capability is unsupported");
+}
+
 function validateDispatch(input: Dispatch): void {
-	if (input.role.editing !== (input.role.name === "builder"))
-		throw new Error("Role editing capability mismatch");
+	if (!input.role.name || typeof input.role.instructions !== "string")
+		throw new Error("Invalid agent definition");
 	if (!input.brief.trim() || input.brief.length > 6000 || (input.context || "").length > 16000)
 		throw new Error("Task brief or context exceeds budget");
 	if (!input.model || !/^[\w.:[\]-]+$/.test(input.model))

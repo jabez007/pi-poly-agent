@@ -1,10 +1,12 @@
+import { validateIntegrations } from "../src/platform/integrations.ts";
+import { loadPlatform } from "../src/platform/config.ts";
+import { ProviderRegistry, validateInstanceDefinition } from "../src/platform/providers.ts";
 import { qualificationPlan } from "../src/orchestration/qualification.ts";
-import { loadOrchestration } from "../src/orchestration/roles.ts";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { bootstrap, PROFILE, validateProfile } from "../src/profile.ts";
+import { bootstrap, PROFILE, validateProfile, assertSafeProfile } from "../src/profile.ts";
 import { assertEnvironment, conflictingEnvironment } from "../src/policy.ts";
 import { discoverMemPalace } from "../src/memory.ts";
 
@@ -36,7 +38,10 @@ export function validateDependencies(): void {
 	}
 }
 
-export function launchArguments(args: string[]): string[] {
+export function launchArguments(
+	args: string[],
+	providers = ["openai-codex", "kimi-coding", "zai", "claude-bridge", "antigravity-acp"],
+): string[] {
 	const accepted: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -46,9 +51,8 @@ export function launchArguments(args: string[]): string[] {
 		}
 		if (
 			arg === "--model" &&
-			/^(openai-codex|kimi-coding|zai|claude-bridge|antigravity-acp)\/[\w.:[\]-]+$/.test(
-				args[i + 1] || "",
-			)
+			/^[\w-]+\/[\w.:[\]-]+$/.test(args[i + 1] || "") &&
+			providers.includes((args[i + 1] || "").split("/")[0])
 		) {
 			accepted.push(arg, args[++i]);
 			continue;
@@ -83,6 +87,47 @@ export function assertProjectConfiguration(cwd: string): void {
 	}
 }
 
+export function selectRecipe(recipe: string, profile = PROFILE): void {
+	assertSafeProfile(profile);
+	if (!["minimal", "implementation-review", "agent-team", "odoo-team"].includes(recipe))
+		throw new Error("Choose a supplied recipe");
+	const file = join(profile, "platform.json");
+	if (existsSync(file))
+		throw new Error(
+			"platform.json already exists; edit it explicitly. No configuration was overwritten.",
+		);
+	writeFileSync(file, JSON.stringify({ version: 1, recipes: [recipe] }, null, 2) + "\n", {
+		flag: "wx",
+		mode: 0o600,
+	});
+	console.log(`Selected ${recipe}. No provider login or request occurred.`);
+}
+
+function reportValidation(
+	policy: ReturnType<typeof validateProfile>,
+	platform: ReturnType<typeof loadPlatform>,
+): void {
+	const names = conflictingEnvironment(process.env);
+	console.log(
+		JSON.stringify(
+			{
+				dependencies: "pinned",
+				agents: platform.agents.map((a) => a.name),
+				workflows: platform.workflows.map((w) => w.id),
+				node: process.versions.node,
+				claude: policy.claude.enabled ? "activated, live unverified" : "locked",
+				google: policy.google.enabled ? "activated, live unverified" : "locked",
+				conflictingVariableNames: names,
+				mempalace: discoverMemPalace()
+					? "existing installation discovered, not contacted"
+					: "unavailable, optional",
+			},
+			null,
+			2,
+		),
+	);
+	if (names.length) process.exitCode = 1;
+}
 export async function main(args: string[]): Promise<void> {
 	assertNode();
 	validateDependencies();
@@ -92,44 +137,44 @@ export async function main(args: string[]): Promise<void> {
 		console.log("Isolated profile ready at .poly/agent. No login or provider requests were made.");
 		return;
 	}
+	if (command === "recipe") {
+		selectRecipe(args[1]);
+		return;
+	}
 	const policy = validateProfile();
-	loadOrchestration(PROFILE);
+	const platform = loadPlatform(PROFILE);
+	validateIntegrations(PROFILE);
+	const providers = new ProviderRegistry(() => validateProfile());
+	for (const instance of platform.providers) validateInstanceDefinition(instance);
 	if (command === "qualify") {
 		console.log(JSON.stringify(qualificationPlan(args[1], policy), null, 2));
 		return;
 	}
 	if (command === "validate") {
-		const names = conflictingEnvironment(process.env);
-		console.log(
-			JSON.stringify(
-				{
-					dependencies: "pinned",
-					node: process.versions.node,
-					claude: policy.claude.enabled ? "activated, live unverified" : "locked",
-					google: policy.google.enabled ? "activated, live unverified" : "locked",
-					conflictingVariableNames: names,
-					mempalace: discoverMemPalace()
-						? "existing installation discovered, not contacted"
-						: "unavailable, optional",
-				},
-				null,
-				2,
-			),
-		);
-		if (names.length) process.exitCode = 1;
+		reportValidation(policy, platform);
 		return;
 	}
 	if (command !== "launch")
-		throw new Error("Commands: bootstrap, validate, qualify PROVIDER, launch");
+		throw new Error("Commands: bootstrap, recipe NAME, validate, qualify PROVIDER, launch");
 	assertEnvironment(process.env);
 	assertProjectConfiguration(process.cwd());
 	if (!process.stdin.isTTY || !process.stdout.isTTY)
 		throw new Error("Managed Pi launch requires an interactive terminal");
 	const cli = join(ROOT, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-	const child = spawn(process.execPath, [cli, ...launchArguments(args.slice(1))], {
-		stdio: "inherit",
-		env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
-	});
+	const child = spawn(
+		process.execPath,
+		[
+			cli,
+			...launchArguments(
+				args.slice(1),
+				[...providers.list(), ...platform.providers].map((p) => p.id),
+			),
+		],
+		{
+			stdio: "inherit",
+			env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
+		},
+	);
 	const forward = (signal: NodeJS.Signals) => {
 		if (child.exitCode === null) child.kill(signal);
 	};

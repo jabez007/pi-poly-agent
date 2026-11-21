@@ -20,7 +20,7 @@ For Z.AI, verify that the key belongs to your Coding Plan. Set `zaiCodingPlan` t
 
 Kimi defaults to OAuth only. A coding-plan key requires setting `kimiApiKey` to `true` and restarting. Pi's pinned provider targets `https://api.kimi.com/coding/v1`, as defined by its `providers/kimi-coding.js`. The profile cannot determine your account's billing agreement from a key. Those acknowledgements are your explicit choice of an authorized coding-plan connection.
 
-Separately metered Anthropic, Google, OpenAI API, gateway, and proxy providers are disabled. This milestone has no metered fallback or Gemini API delegation path. A future API connection needs a separately named provider and explicit authorization.
+Built-in separately metered Anthropic, Google, OpenAI API, gateway, and proxy providers remain disabled. v0.4 supports separately named, explicitly activated local or API-billed compatible instances through [provider registration](platform.md#register-provider-instances). They cannot borrow subscription credentials. There is no metered fallback or Gemini API delegation path.
 
 ## Review and activate Google ACP
 
@@ -80,7 +80,7 @@ Run `npm run validate` for variable names only. Correct the intended launch envi
 | Google consumer ACP                   | Locked until authorized activation | Forbidden            | Direct human input only; no model-generated or automated handoff prompts |
 | Custom APIs and open-weight endpoints | Unconfigured                       | Blocked              | Needs a separate explicitly authorized provider instance                 |
 
-Codex, Kimi, and opted-in Z.AI parents can request the `delegate_task` tool, subject to interactive approval. A user can invoke delegation commands while another direct provider is selected, but only an authorized native worker is dispatched. Worker role configuration never changes these capabilities. Read-only roles cannot become builders by editing configuration.
+Codex, Kimi, and opted-in Z.AI parents can request the `delegate_task` tool, subject to interactive approval. A user can invoke delegation commands while another direct provider is selected, but only an eligible registered worker is dispatched. Agent configuration cannot widen provider policy. Effective permissions determine whether an agent can edit.
 
 No provider/model fallback is selected when child initialization, authentication, or execution fails. Native provider transports receive `maxRetries: 0`. Child sessions share Pi's supported isolated credential store through its SDK; tokens are not copied into task records, tool environments, or memory.
 
@@ -89,3 +89,9 @@ No provider/model fallback is selected when child initialization, authentication
 `npm run qualify -- PROVIDER` prints a manual plan for `openai-codex`, `kimi-coding`, or `zai`. It performs no credential resolution, login, model request, or live test. Follow [qualification procedures](qualification.md) only after reviewing and choosing the operations yourself.
 
 Native worker failures have fixed, secret-screened categories and explicit recovery guidance. Provider/model identity never changes automatically. Quota, authentication, context, or uncertain transport failures do not trigger retries. `/task ID recover` is an approved new worker with a fresh transcript and preserved source changes. Existing provider-private execution state is not restored. Claude worker delegation remains blocked; Google consumer ACP remains direct-interaction-only.
+
+## v0.4 provider-instance qualification
+
+Provider instances advertise direct interaction, delegation, concurrency, streaming, cancellation, tools, editing/read-only execution, persistence, handoffs, and billing classification. Native subscription restrictions cannot be overridden by instance declarations. Custom adapters cannot register OAuth or replace reserved providers. Exact endpoint and environment checks run again at the request boundary.
+
+The native Codex/Kimi/Z.AI scenarios remain mock-tested only. A fake loopback OpenAI-compatible server also exercises Pi's real transport, local instance registration, and independent worker execution without credentials. This does not qualify a hosted model, inference gateway, subscription, or billing agreement. Continue using the [opt-in qualification procedure](qualification.md) before relying on live accounts.

@@ -1,4 +1,6 @@
-# Work with independent Pi agents
+# Run configured agents and workflows
+
+The commands below for builder and reviewer apply to the optional `implementation-review` recipe or legacy compatibility profiles. Custom agents use `/delegate AGENT`; custom recipes use `/workflow NAME OBJECTIVE`. See [configuration examples](platform.md). Minimal profiles do not require these agents or enable the `/implement` and `/review` aliases.
 
 ## Launch in your project
 
@@ -16,7 +18,7 @@ Unknown project `.pi/settings.json`, `models.json`, and `mcp.json` files cause l
 
 ## Implement with guided independent review
 
-Run `/implement Objective and acceptance criteria`. Select an authorized Builder and a different provider/model for review. Pi previews each focused packet and asks for each launch. When the builder completes, accept the review offer. The final action picker can show the diff and review findings, then ask whether to integrate. Declining any prompt preserves existing results and worktrees.
+Select the `implementation-review` recipe, then run `/workflow implementation-review Objective and acceptance criteria` or its `/implement` alias. Select an authorized Builder and a different provider/model for review. Pi previews each focused packet and asks for each launch. When the builder completes, accept the review offer. The final action picker can show the diff and review findings, then ask whether to integrate. Declining any prompt preserves existing results and worktrees.
 
 Use `/tasks` for a compact list with elapsed time, operation, provider/model, branch, result availability, and integration state. Select a task for its next action. `/tasks all` prints every record without opening a picker. Guided offers stop when switching or shutting down Pi sessions. Restart never starts a reviewer automatically.
 
@@ -54,7 +56,7 @@ The reviewer receives the objective, approved project context, changed files, an
 
 Use another authorized provider/model if desired. Roles are independent of provider choice. A review is a separate execution even when you choose the same provider. Only fixtures using Codex and Kimi identities have been tested; live model quality is unqualified.
 
-The parent model can request `delegate_task` and inspect `task_status`. To review a builder, it must set `role: "reviewer"` and `reviewOf` to that builder's ID. Dispatch through this tool uses the same capability checks, context preview, and human confirmation as `/delegate`. Completion messages do not automatically start a parent or Google turn.
+The parent model can request `delegate_task` and inspect `task_status`. To inspect a snapshot, it selects a configured read-only agent and sets `reviewOf` to the editing task's ID. Dispatch through this tool uses the same capability checks, context preview, and human confirmation as `/delegate`. Completion messages do not automatically start a parent or Google turn.
 
 ## Accept or discard changes
 
@@ -72,7 +74,7 @@ If lease acquisition itself was interrupted, Pi fails closed with the `host-acqu
 
 Interrupted integration is reported separately. Inspect the parent using `git status`, `git log`, and your normal Git tools before completing or aborting an unfinished cherry-pick yourself. Pi neither auto-replays integration nor claims to know whether an interrupted Git operation completed.
 
-## Configure roles and limits
+## Preserve legacy configuration
 
 Optionally create `.poly/agent/orchestration.json`:
 
@@ -88,7 +90,7 @@ Optionally create `.poly/agent/orchestration.json`:
 }
 ```
 
-Concurrency is 1–4, timeout is 1–3600 seconds, and delegation depth is fixed at one. `model` and `instructions` are configurable. Role editing permissions are fixed: only builders edit. No provider is selected as an implicit fallback.
+Concurrency is 1–4, timeout is 1–3600 seconds, and delegation depth is fixed at one. `model` and `instructions` are configurable. These are the optional legacy example permissions. For arbitrary agents, selected resources, and intersected permissions, use [platform configuration](platform.md). No provider is selected as an implicit fallback.
 
 ## Preserve useful context
 
@@ -111,3 +113,9 @@ Automatic compaction and turn retries remain disabled. Manual `/compact` require
 ## Qualify providers and use terminal tools
 
 Use the [manual provider checklist](qualification.md) for explicitly authorized account tests. See [terminal integration examples](terminal.md) for optional tmux, Neovim, AstroNvim, and Lazygit workflows.
+
+## Discover and recover workflow runs
+
+Use `/workflow` without a matching name to list configured recipes. `/workflow-runs` shows durable run IDs, each step's task ID, and lifecycle state. `/workflow-runs ID cancel` stops that run's owned tasks. Sequential and parallel recipes share the same task admission, sandbox, context, and workspace controls as `/delegate`.
+
+On restart, running or waiting-for-approval runs become interrupted. No step or approval is replayed. Inspect retained task results with `/tasks` and `/task ID`; recover an interrupted task explicitly or start a separately approved new workflow. A new run is not a resumed provider session. Integration still requires an independent read-only snapshot inspection and final user approval, regardless of agent names.

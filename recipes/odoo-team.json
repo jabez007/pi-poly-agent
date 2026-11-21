@@ -1,0 +1,70 @@
+{
+	"version": 1,
+	"compatibility": false,
+	"agents": {
+		"architecture-specialist": {
+			"description": "",
+			"instructions": "Inspect Odoo module boundaries, dependencies and security constraints. Cite source references.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		},
+		"inventory-mrp-specialist": {
+			"description": "",
+			"instructions": "Investigate inventory and MRP requirements, stock moves, units and procurement rules. Identify uncertainty. Cite source evidence.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		},
+		"python-specialist": {
+			"description": "",
+			"instructions": "Implement the approved Python/Odoo change. Follow project AGENTS.md and module conventions. Run approved tests.",
+			"policy": {
+				"permissions": ["read", "write", "test"],
+				"tools": ["read", "write", "edit", "run_test", "review_diff"]
+			}
+		},
+		"quality-analyst": {
+			"description": "",
+			"instructions": "Independently inspect Python/Odoo changes, access rules and tests. Cite defects and missing coverage.",
+			"policy": {
+				"permissions": ["read"],
+				"tools": ["read", "review_diff"]
+			}
+		}
+	},
+	"workflows": {
+		"domain-change": {
+			"steps": [
+				{
+					"id": "architecture",
+					"agent": "architecture-specialist",
+					"objective": "Assess architecture for {{input}}"
+				},
+				{
+					"id": "domain",
+					"agent": "inventory-mrp-specialist",
+					"objective": "Assess domain rules for {{input}}"
+				},
+				{
+					"id": "change",
+					"agent": "python-specialist",
+					"objective": "{{input}}",
+					"needs": ["architecture", "domain"],
+					"contextFrom": ["architecture", "domain"]
+				},
+				{
+					"id": "quality",
+					"agent": "quality-analyst",
+					"objective": "Inspect implementation of {{input}}",
+					"needs": ["change"],
+					"contextFrom": ["change"],
+					"inspect": "change",
+					"approval": "Approve quality inspection?"
+				}
+			]
+		}
+	}
+}

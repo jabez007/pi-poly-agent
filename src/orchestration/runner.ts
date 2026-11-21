@@ -1,3 +1,8 @@
+import { agentPolicy, effectivePolicy } from "../platform/contracts.ts";
+import { ProviderRegistry, nativeWorkerProvider } from "../platform/providers.ts";
+import { emptyResources, workerTools, resourceInstructions } from "../platform/resources.ts";
+import type { WorkerResources } from "../platform/contracts.ts";
+export { nativeWorkerProvider } from "../platform/providers.ts";
 import { safeFailure } from "./errors.ts";
 import { untilCanceled } from "./cancellation.ts";
 import { protectedWorkerProvider } from "./stream.ts";
@@ -12,25 +17,11 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { Provider } from "@earendil-works/pi-ai";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
-import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { assertEnvironment, guardedProvider } from "../policy.ts";
 import { assertSafeProfile, loadPolicy } from "../profile.ts";
-import { assertDelegation } from "./capabilities.ts";
 import { validateTaskResult, type Task, type TaskRunner } from "./tasks.ts";
 import { scopedTools, testTool, diffTool, type ApproveTest } from "./tools.ts";
 
-export function nativeWorkerProvider(id: string): Provider {
-	const factories: Record<string, () => Provider> = {
-		"openai-codex": openaiCodexProvider,
-		"kimi-coding": kimiCodingProvider,
-		zai: zaiProvider,
-	};
-	if (!factories[id]) throw new Error("Worker provider is not supported");
-	return factories[id]();
-}
 export function taskPrompt(task: Task): string {
 	return [
 		task.role.instructions,
@@ -38,10 +29,11 @@ export function taskPrompt(task: Task): string {
 		`Task: ${task.id}\nParent: ${task.parent}\nRole: ${task.role.name}\nProvider/model: ${task.provider}/${task.model}\nGit base: ${task.workspace.base}\nWorktree: ${task.workspace.path}`,
 		`Objective and acceptance criteria:\n${task.brief}`,
 		`Approved context:\n${task.context || "No additional context supplied."}`,
+		`Expected artifact kinds: ${(task.role.outputs || []).join(", ") || "standard summary, findings, tests and diff"}`,
 		task.reviewBase
 			? `Use review_diff for each changed file against original base ${task.reviewBase}. Verify previous agent claims independently.`
 			: "",
-		'Return only a JSON object with summary (string), files (string[]), tests (string[]), findings ({text, source, severity: "info"|"warning"|"error"}[]), and questions (string[]). Cite file paths and lines in findings. Test claims are checked against actual tool executions.',
+		'Return only a JSON object with summary (string), files (string[]), tests (string[]), findings ({text, source, severity: "info"|"warning"|"error"}[]), and questions (string[]). Cite file paths and lines in findings. Test claims are checked against actual tool executions. Optional artifacts are {kind, content, source} records for custom output contracts and remain unverified claims.',
 	].join("\n\n");
 }
 
@@ -50,11 +42,16 @@ export function createPiRunner(
 	profile: string,
 	approve: ApproveTest,
 	providerFactory = nativeWorkerProvider,
+	registry = new ProviderRegistry(() => loadPolicy(profile)),
+	resources: WorkerResources = emptyResources(),
 ): TaskRunner {
 	return async ({ task, signal, progress, session: recordSession }) => {
 		assertEnvironment(process.env);
 		const policy = loadPolicy(profile);
-		assertDelegation(task.provider, policy, task.depth);
+		registry.assert(task.provider, task.depth);
+		const execution = effectivePolicy(agentPolicy(task.role), task.effectivePolicy || {});
+		if (task.role.editing !== execution.permissions.includes("write"))
+			throw new Error("Worker permission projection mismatch");
 		if (signal.aborted) throw new Error("Canceled before child initialization");
 		const directory = join(dirname(task.workspace.path), "sessions");
 		assertSafeProfile(directory);
@@ -67,14 +64,14 @@ export function createPiRunner(
 			refreshOnCreate: false,
 			signal,
 		});
-		const provider = providerFactory(task.provider);
+		const provider = registry.provider(task.provider, false, providerFactory);
 		if (provider.id !== task.provider) throw new Error("Worker provider identity mismatch");
 		if (task.provider === "kimi-coding" && !policy.kimiApiKey) provider.auth.apiKey = undefined;
 		new ModelRegistry(runtime).registerProvider(
 			guardedProvider(
 				protectedWorkerProvider(provider, () => progress("Receiving worker response")),
 				() => {
-					assertDelegation(task.provider, loadPolicy(profile), task.depth);
+					registry.assert(task.provider, task.depth);
 					if (signal.aborted) throw new Error("Canceled worker request");
 				},
 			),
@@ -99,9 +96,8 @@ export function createPiRunner(
 		});
 		await loader.reload();
 		const tests: string[] = [];
-		const tools = scopedTools(task.workspace.path, task.role.editing);
-		if (task.reviewBase) tools.push(diffTool(task.workspace.path, task.reviewBase));
-		if (task.role.editing) tools.push(testTool(task.workspace.path, approve, tests));
+		const selected = selectedTools(task, approve, tests, resources);
+		const instructions = resourceInstructions(task, resources);
 		const { session, modelFallbackMessage } = await createAgentSession({
 			cwd: task.workspace.path,
 			agentDir: directory,
@@ -110,8 +106,8 @@ export function createPiRunner(
 			settingsManager: settings,
 			resourceLoader: loader,
 			sessionManager: SessionManager.create(task.workspace.path, directory),
-			tools: tools.map((t) => t.name),
-			customTools: tools,
+			tools: selected.map((t) => t.name),
+			customTools: selected,
 		});
 		const abort = () => {
 			void session.abort().catch(() => {});
@@ -126,7 +122,10 @@ export function createPiRunner(
 			recordSession?.(session.sessionManager.getSessionFile() || "");
 			assertChildModel(session, task, modelFallbackMessage);
 			if (signal.aborted) throw new Error("Canceled before prompt");
-			await untilCanceled(session.prompt(taskPrompt(task)), signal);
+			await untilCanceled(
+				session.prompt([taskPrompt(task), instructions].filter(Boolean).join("\n\n")),
+				signal,
+			);
 			if (signal.aborted) throw new Error("Canceled");
 			const result = workerResult(session.messages);
 			return { ...result, tests };
@@ -154,4 +153,18 @@ function workerResult(messages: AgentSession["messages"]) {
 function assertChildModel(session: AgentSession, task: Task, fallback?: string): void {
 	if (fallback || session.model?.provider !== task.provider || session.model?.id !== task.model)
 		throw new Error("Child attempted model fallback");
+}
+
+function selectedTools(
+	task: Task,
+	approve: ApproveTest,
+	tests: string[],
+	resources: WorkerResources,
+) {
+	const execution = effectivePolicy(agentPolicy(task.role), task.effectivePolicy || {});
+	const tools = scopedTools(task.workspace.path, execution.permissions.includes("write"));
+	if (task.reviewBase) tools.push(diffTool(task.workspace.path, task.reviewBase));
+	if (execution.permissions.includes("test") && execution.permissions.includes("write"))
+		tools.push(testTool(task.workspace.path, approve, tests));
+	return workerTools(task, tools, resources);
 }
