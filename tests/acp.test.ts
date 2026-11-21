@@ -118,6 +118,7 @@ test("mock ACP streams through Pi without forwarding private transcript or syste
 		maxTokens: 32000,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	};
+	await f.session.discover();
 	const stream = acpStream(
 		f.session,
 		model,
@@ -139,7 +140,12 @@ test("mock ACP streams through Pi without forwarding private transcript or syste
 test("permission cancellation, unavailable UI, and unknown options fail closed", async () => {
 	const request = {
 		sessionId: "s",
-		toolCall: { toolCallId: "t", title: "Write file" },
+		toolCall: {
+			toolCallId: "t",
+			title: "Write file",
+			kind: "edit" as const,
+			rawInput: { path: "/tmp/file", content: "fixture" },
+		},
 		options: [
 			{ optionId: "one", name: "Allow once", kind: "allow_once" as const },
 			{ optionId: "all", name: "Always", kind: "allow_always" as const },

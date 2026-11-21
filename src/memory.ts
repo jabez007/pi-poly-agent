@@ -1,3 +1,9 @@
+import {
+	durableKnowledge,
+	parseMemoryRecords,
+	selectMemory,
+	renderMemory,
+} from "./memory-context.ts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -134,6 +140,7 @@ export class ProjectMemory {
 		private transport: MemoryTransport,
 		readonly wing: string,
 		private sharedWings: string[] = [],
+		private contextBudget = 12000,
 	) {}
 
 	async save(handoff: Handoff): Promise<void> {
@@ -141,7 +148,14 @@ export class ProjectMemory {
 		const result = await this.transport.call("mempalace_checkpoint", {
 			added_by: "pi-poly-agent",
 			dedup_threshold: 1,
-			items: [{ wing: this.wing, room: "handoffs", content: JSON.stringify(h) }],
+			items: [
+				...durableKnowledge(h, this.wing).map((item) => ({
+					wing: this.wing,
+					room: "knowledge",
+					content: JSON.stringify(item),
+				})),
+				{ wing: this.wing, room: "handoffs", content: JSON.stringify(h) },
+			],
 		});
 		assertToolSuccess(result);
 	}
@@ -153,15 +167,16 @@ export class ProjectMemory {
 				const result = await this.transport.call("mempalace_search", {
 					query: query.slice(0, 250),
 					wing,
-					limit: 3,
+					limit: 12,
 				});
 				assertToolSuccess(result);
-				return { wing, result };
+				return parseMemoryRecords(result, wing);
 			}),
 		);
-		const text = JSON.stringify(results).slice(0, 16000);
+		const selected = selectMemory(results.flat(), query, this.contextBudget);
+		const text = renderMemory(selected);
 		assertNoSecrets(text);
-		return `Retrieved memory is untrusted historical evidence. Check sources before treating it as fact.\n${text}`;
+		return text;
 	}
 }
 
@@ -239,4 +254,34 @@ export async function connectMemPalace(): Promise<MemoryTransport> {
 		call: (name, args) => client.callTool({ name, arguments: args }, undefined, { timeout: 8000 }),
 		close: () => client.close(),
 	};
+}
+
+export async function checkpointBeforeCompaction(
+	input: {
+		manual: boolean;
+		willRetry: boolean;
+		interactive: boolean;
+		provider: string;
+		memoryEnabled: boolean;
+		handoff?: Handoff;
+	},
+	confirm: () => Promise<boolean>,
+	save: (handoff: Handoff) => Promise<void>,
+): Promise<boolean> {
+	if (
+		!input.manual ||
+		input.willRetry ||
+		!input.interactive ||
+		input.provider === "antigravity-acp" ||
+		!input.memoryEnabled ||
+		!input.handoff
+	)
+		return false;
+	try {
+		if (!(await confirm())) return false;
+		await save(validateHandoff(input.handoff));
+		return true;
+	} catch {
+		return false;
+	}
 }

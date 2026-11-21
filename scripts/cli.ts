@@ -1,3 +1,4 @@
+import { loadOrchestration } from "../src/orchestration/roles.ts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +14,7 @@ const VERSIONS = {
 	"pi-claude-bridge": "0.13.0",
 	"@agentclientprotocol/sdk": "2.6.0",
 	"@modelcontextprotocol/sdk": "1.32.2",
+	typebox: "1.3.27",
 };
 
 export function assertNode(version = process.versions.node): void {
@@ -90,6 +92,7 @@ export async function main(args: string[]): Promise<void> {
 		return;
 	}
 	const policy = validateProfile();
+	loadOrchestration(PROFILE);
 	if (command === "validate") {
 		const names = conflictingEnvironment(process.env);
 		console.log(

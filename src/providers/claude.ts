@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
-import { BRIDGE_PROVIDER, type Activation } from "../policy.ts";
+import { BRIDGE_PROVIDER, assertInvocationEnvironment, type Activation } from "../policy.ts";
 import { attestRuntime, readConfiguration } from "../profile.ts";
 
 export async function registerClaudeBridge(
@@ -47,11 +47,19 @@ export async function registerClaudeBridge(
 		const stream = config.streamSimple!;
 		pi.registerProvider(id, {
 			...config,
-			streamSimple: (...args) => {
-				check();
-				return stream(...args);
-			},
+			streamSimple: guardedClaudeStream(stream, check),
 		});
 	}) as ExtensionAPI["registerProvider"];
 	upstream.default(facade);
+}
+
+export function guardedClaudeStream(
+	stream: NonNullable<ProviderConfig["streamSimple"]>,
+	check: () => void,
+): NonNullable<ProviderConfig["streamSimple"]> {
+	return (...args) => {
+		check();
+		assertInvocationEnvironment(args[2]);
+		return stream(...args);
+	};
 }

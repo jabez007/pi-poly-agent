@@ -36,6 +36,8 @@ test("Pi registration, picker discovery, one-shot Google input gate, and approva
 		on: (name: string, handler: any) => {
 			handlers.set(name, [...(handlers.get(name) || []), handler]);
 		},
+		registerTool: () => {},
+		appendEntry: (name: string, data: any) => session.appendCustomEntry(name, data),
 		registerCommand: (name: string, config: any) => commands.set(name, config),
 		registerProvider: (name: any, config: any) =>
 			providers.set(typeof name === "string" ? name : name.id, config || name),
@@ -110,6 +112,16 @@ test("Pi registration, picker discovery, one-shot Google input gate, and approva
 		const input = handlers.get("input")![0];
 		assert.equal(input({ source: "rpc", text: "Delegated prompt" }, context).action, "handled");
 		assert.throws(stream, /direct interactive/);
+		assert.equal(
+			input({ source: "extension", text: "Generated handoff" }, context).action,
+			"handled",
+		);
+		context.mode = "rpc";
+		assert.equal(
+			input({ source: "interactive", text: "Synthetic human marker" }, context).action,
+			"handled",
+		);
+		context.mode = "tui";
 		input({ source: "interactive", text: "Human task" }, context);
 		assert.equal((await stream().result()).stopReason, "stop");
 		assert.throws(

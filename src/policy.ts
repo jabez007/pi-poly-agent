@@ -18,7 +18,7 @@ export interface Policy {
 	google: Activation;
 	kimiApiKey: boolean;
 	zaiCodingPlan: boolean;
-	memory: { enabled: boolean; sharedWings: string[] };
+	memory: { enabled: boolean; sharedWings: string[]; contextBudget?: number };
 }
 
 export function defaultPolicy(): Policy {
@@ -62,6 +62,7 @@ export function validatePolicy(value: unknown): Policy {
 	) {
 		throw new Error("Invalid shared memory wing");
 	}
+	validateMemoryBudget(p.memory.contextBudget);
 	return p;
 }
 
@@ -85,10 +86,10 @@ export function conflictingEnvironment(env: NodeJS.ProcessEnv): string[] {
 			(key) =>
 				env[key] &&
 				(/^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_BRIDGE_|GOOGLE_|GEMINI_|AGY_|PI_AGY_)/.test(key) ||
-					/^(HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|NODE_OPTIONS)$/.test(
+					/^(HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|NODE_OPTIONS|NODE_PATH)$/.test(
 						key,
 					) ||
-					/^(OPENAI_BASE_URL|OPENAI_API_KEY|OPENAI_API_BASE|KIMI_BASE_URL|ZAI_BASE_URL)$/.test(
+					/^(OPENAI_BASE_URL|OPENAI_API_KEY|OPENAI_API_BASE|KIMI_BASE_URL|ZAI_BASE_URL|LD_.*|AWS_ENDPOINT_URL.*|AWS_BEARER_TOKEN.*|ANTHROPIC_FOUNDRY_.*|ENABLE_CLAUDEAI_MCP_SERVERS)$/.test(
 						key,
 					)),
 		)
@@ -101,6 +102,19 @@ export function assertEnvironment(env: NodeJS.ProcessEnv): void {
 			"Conflicting provider, proxy, or debug environment detected. Run validate for variable names.",
 		);
 	}
+}
+
+/** Check both sources before a provider can merge request overrides into its process environment. */
+export function assertInvocationEnvironment(
+	options?: { env?: Record<string, string> },
+	inherited: NodeJS.ProcessEnv = process.env,
+): void {
+	assertEnvironment(inherited);
+	const overrides = options?.env || {};
+	assertEnvironment(overrides);
+	// Stored credential environments are also untrusted. Even empty overrides can remove guards.
+	if (Object.keys(overrides).some((key) => !/^(LANG|LC_ALL|TZ|TERM|NO_COLOR)$/.test(key)))
+		throw new Error("Unreviewed per-request environment override refused; values withheld");
 }
 
 export function assertRequest(provider: string, policy: Policy, direct = false): void {
@@ -128,18 +142,26 @@ export function assertRequest(provider: string, policy: Policy, direct = false):
 export function guardedProvider(provider: Provider, check: () => void): Provider {
 	const guard = (model: { baseUrl: string }, options?: { env?: Record<string, string> }) => {
 		check();
-		assertEnvironment(options?.env || {});
+		assertInvocationEnvironment(options);
 		if (model.baseUrl !== provider.baseUrl) throw new Error("Provider endpoint override refused");
 	};
 	return {
 		...provider,
 		stream: (...args) => {
 			guard(args[0], args[2]);
-			return provider.stream(...args);
+			return provider.stream(args[0], args[1], { ...args[2], maxRetries: 0 } as (typeof args)[2]);
 		},
 		streamSimple: (...args) => {
 			guard(args[0], args[2]);
-			return provider.streamSimple(...args);
+			return provider.streamSimple(args[0], args[1], {
+				...args[2],
+				maxRetries: 0,
+			} as (typeof args)[2]);
 		},
 	};
+}
+
+function validateMemoryBudget(value: number | undefined): void {
+	if (value !== undefined && (!Number.isInteger(value) || value < 256 || value > 24000))
+		throw new Error("Memory context budget must be 256–24000 characters");
 }

@@ -12,20 +12,20 @@ Google's published clarification supports direct interaction through compatible 
 
 ## Enforcement
 
-| Control                        | Implementation                                                                                                                                           |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No credential migration        | Bootstrap creates an isolated Pi profile without reading other auth stores.                                                                              |
-| Native provider authentication | Pi handles Codex and Kimi login. Claude Code and Google retain their own subscription credentials.                                                       |
-| No implicit API billing        | Alternate providers are replaced with empty, non-authenticating definitions. Z.AI and Kimi coding keys require explicit policy choices.                  |
-| Conflicting configuration      | Launch and stream checks reject provider overrides, API-key conflicts, proxy injection, and debug settings. Diagnostics report names only.               |
-| Google direct interaction      | Only a TUI input event with source `interactive` grants one Google stream request. RPC, extension input, and automatic continuations have no capability. |
-| Google permission mode         | Session initialization must offer `default`; the adapter selects it explicitly. No `yolo` fallback exists.                                               |
-| Tool approvals                 | Pi tools require interactive confirmation for every call. ACP accepts only single-use approval options and cancels when UI fails or closes.              |
-| Runtime provenance             | The adapter verifies the selected executable digest immediately before spawn. No updater or downloader exists in this repository.                        |
-| Secrets in diagnostics         | Runtime stderr is discarded. Adapter failures use fixed messages. Memory checks reject known secret forms.                                               |
-| Memory routing                 | Retrieval and handoff preparation do not call a provider. The user manually submits context from the editor.                                             |
+| Control                        | Implementation                                                                                                                                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No credential migration        | Bootstrap creates an isolated Pi profile without reading other auth stores.                                                                                                                                                                     |
+| Native provider authentication | Pi handles Codex and Kimi login. Claude Code and Google retain their own subscription credentials.                                                                                                                                              |
+| No implicit API billing        | Alternate providers are replaced with empty, non-authenticating definitions. Z.AI and Kimi coding keys require explicit policy choices.                                                                                                         |
+| Conflicting configuration      | Launch and stream checks reject provider overrides, API-key conflicts, proxy injection, and debug settings. Diagnostics report names only.                                                                                                      |
+| Google direct interaction      | Only a TUI input event with source `interactive` grants one Google stream request. RPC, extension input, and automatic continuations have no capability.                                                                                        |
+| Google permission mode         | Session initialization must offer `default`; the adapter selects it explicitly. No `yolo` fallback exists.                                                                                                                                      |
+| Tool approvals                 | Parent Pi tools require interactive confirmation. Scoped worker file tools require an approved task; sandbox test commands require separate confirmation. ACP shows contextual details, offers single-use options, and rejects opaque requests. |
+| Runtime provenance             | The adapter verifies the selected executable digest immediately before spawn. No updater or downloader exists in this repository.                                                                                                               |
+| Secrets in diagnostics         | ACP runtime stderr is discarded. Adapter failures and child-provider errors use fixed messages. Child results and memory reject known secret forms.                                                                                             |
+| Memory routing                 | Retrieval and handoff preparation do not call a provider. The user manually submits context from the editor.                                                                                                                                    |
 
-`--offline` disables startup network operations, not user-directed coding. Built-in provider definitions outside the managed profile have empty model lists and no OAuth flow. No delegation extension is loaded. Third-party project executable configuration causes managed launch to stop for review, preserving the original files.
+`--offline` disables startup network operations, not user-directed coding. Built-in provider definitions outside the managed profile have empty model lists and no OAuth flow. Only the managed delegation extension is registered; arbitrary subagent extensions are not loaded. Third-party project executable configuration causes managed launch to stop for review, preserving the original files.
 
 ## Memory privacy
 
@@ -49,7 +49,7 @@ The initial npm advisory check identified a moderate development-tool chain thro
 
 The final advisory check reported zero advisories. The reviewed lifecycle inventory contains Google's no-op preinstall, esbuild's binary setup, protobufjs's compatibility warning, and optional macOS fsevents installation. All remained disabled during the clean lockfile installation. The Linux checks succeeded using the packaged optional esbuild binary.
 
-Verification on Node 22.21.1 passed `npm ci --ignore-scripts`, `npm run check`, and two consecutive `npm run bootstrap` invocations after a real Pi TUI startup. The check ran type checking, ESLint with complexity limit 12, formatting verification, and 20 tests. The ACP subprocess fixture exercised the official SDK's JSON-RPC initialization, native-auth method selection, model discovery, prompting, and permission responses. The real Pi CLI loaded the extension offline, listed the locked models, displayed `/poly-status`, and exited without a provider prompt or login.
+Initial v0.1 verification on Node 22.21.1 passed `npm ci --ignore-scripts`, `npm run check`, and two consecutive `npm run bootstrap` invocations after a real Pi TUI startup. The check ran type checking, ESLint with complexity limit 12, formatting verification, and 20 tests. The ACP subprocess fixture exercised the official SDK's JSON-RPC initialization, native-auth method selection, model discovery, prompting, and permission responses. The real Pi CLI loaded the extension offline, listed the locked models, displayed `/poly-status`, and exited without a provider prompt or login.
 
 Gitleaks 8.30.1 reported no candidates in a filesystem scan of this checkout using built-in rules. It did not validate credentials or inspect historical revisions. Scanner defaults and suppressions limit coverage. No existing function exceeded the configured complexity limit at handoff; no unrelated cleanup was applied.
 
@@ -61,3 +61,27 @@ Gitleaks 8.30.1 reported no candidates in a filesystem scan of this checkout usi
 4. The launcher rejects inherited API keys and other authentication overrides. Run `npm run validate` to identify conflicting variable names, then resolve them in the intended launch shell. Diagnostics never include their values.
 5. This profile is not an operating-system sandbox. Trusted extensions, arbitrary approved shell commands, or a person running an unmanaged Pi binary can bypass its application-level restrictions. It does not claim to police the user's entire workstation.
 6. Native provider model catalogs are pinned and can become stale. ACP model discovery requires explicit live activation. Quota and billing information are not inferred from mock responses.
+
+## v0.2 provider invocation and delegation
+
+The Claude stream wrapper now validates both `process.env` and `options.env` before upstream invocation. The same validator protects native provider streams and Google stream requests. Per-request overrides accept only locale, timezone, terminal, and color settings. Credential-supplied empty strings cannot remove a forbidden variable or change HOME, executable lookup, native storage, gateways, endpoints, or billing. Errors omit values. The bridge's `ccChildEnv` deliberately merges credential environments over the parent; validation therefore occurs before that merge, rather than trusting its propagation behavior.
+
+Delegation checks capabilities at UI selection, dispatch, child initialization, and every native request. Depth is exactly one. Claude subscription workers remain disabled even if direct Claude use is activated. Consumer Antigravity ACP workers remain forbidden even if Google activation is complete or a human approves a task. No child loads the Claude bridge or ACP runtime. A separate Gemini API provider is not configured.
+
+Worker tools cannot construct new authenticated sessions: there is no general shell, arbitrary extension loading, or credential-file access. Builder test execution runs under Bubblewrap with no network or host credential stores. Tests of those controls use real temporary repositories and independent Pi SDK sessions with mocked Codex and Kimi transports. An additional opt-in Linux test verifies actual sandbox execution. Worktree isolation is not a general host security sandbox for arbitrary plugins; do not load additional executable resources into managed workers.
+
+Native stream wrappers force zero transport retries. Pi turn retries and automatic compaction stay disabled. Manual compaction requires a successful reviewed MemPalace checkpoint; Google compaction and overflow recovery that would retry a turn are rejected. Official native runtimes may have their own internal transport behavior, which this project does not intercept or rewrite. Safe pre-request transport retry classification remains deferred.
+
+ACP permissions display the tool title, operation kind, supplied arguments, locations, proposed content, risk description, and single-invocation scope. Missing operation details, excessive preview size, known sensitive content, cancellation, and unavailable UI deny the request. Only `allow_once` and `reject_once` can be selected. The adapter does not invent missing command arguments or claim knowledge the runtime did not supply.
+
+Documented ACP restoration is attempted only from the explicit discovery command and only with advertised `loadSession` support. A failure never silently creates a new session. Saved identifiers are local Pi recovery references, not credentials, and are never included in another provider's prompt or MemPalace handoff.
+
+Task results and briefs are screened before persistence. Worker native sessions still contain approved source context and model output, so they are private local artifacts under the ignored profile. Pattern screening does not prove arbitrary text is free of confidential information. Review every context packet before dispatch or memory persistence. No automatic extraction promotes an agent claim to a verified fact.
+
+## v0.2 verification evidence
+
+On Node 22.21.1, `npm ci --ignore-scripts --offline` succeeded. `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 41 offline tests, including actual Bubblewrap execution. Two bootstrap runs passed without overwriting the isolated profile. Validation rejected an inherited conflicting variable by name and passed in a temporary validation process without it. The original environment was preserved.
+
+The Codex-builder/Kimi-reviewer fixture uses real independent Pi SDK sessions and Git worktrees while replacing provider transports. It checks source editing, independent diff inspection, structured findings, parent preservation, and integration. A second integration fixture runs two actual Pi SDK sessions concurrently with independent provider identities and worktree contents. Command tests verify review and final approval requirements. Claude's negative environment regression was observed failing with its invocation check temporarily removed, then passing after restoration. The ACP permission regression also failed before its fix.
+
+A v0.2 offline TUI startup loaded the managed extension, displayed `/agents` and `/tasks`, and exited without a login or model prompt. `npm audit` reported zero advisories. Gitleaks 8.30.1 found no candidates in a temporary source candidate assembled from tracked and unignored repository files using built-in rules, without warnings or credential validation. Dependency directories, ignored local profiles, and historical Git revisions were outside that scan.

@@ -40,7 +40,12 @@ const app = agent({ name: "fixture" })
 	.onRequest("session/prompt", async ({ params, client }) => {
 		const permission = await client.request("session/request_permission", {
 			sessionId: params.sessionId,
-			toolCall: { toolCallId: "fixture-tool", title: "Fixture permission" },
+			toolCall: {
+				toolCallId: "fixture-tool",
+				title: "Fixture permission",
+				kind: "read",
+				rawInput: { path: "/tmp/fixture" },
+			},
 			options: [{ optionId: "fixture-once", kind: "allow_once", name: "Allow once" }],
 		});
 		if (permission.outcome.outcome !== "selected") return { stopReason: "cancelled" };

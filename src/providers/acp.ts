@@ -12,8 +12,10 @@ import {
 import type { Activation } from "../policy.ts";
 import { attestRuntime } from "../profile.ts";
 import { assertEnvironment } from "../policy.ts";
+import { assertNoSecrets } from "../memory.ts";
 
 export interface AcpPort {
+	supportsLoad?: boolean;
 	request(method: string, params: any, options?: { signal?: AbortSignal }): Promise<any>;
 	notify(method: string, params: any): Promise<void>;
 	close(): void;
@@ -45,6 +47,9 @@ export function officialAcpFactory(activation: Activation, cwd: string): AcpFact
 		const close = () => {
 			connection.close();
 			child.kill("SIGTERM");
+			const timer = setTimeout(() => child.kill("SIGKILL"), 1000);
+			timer.unref();
+			child.once("exit", () => clearTimeout(timer));
 		};
 		try {
 			const initialized = await connection.agent.request(
@@ -66,6 +71,7 @@ export function officialAcpFactory(activation: Activation, cwd: string): AcpFact
 				{ cancellationSignal: AbortSignal.timeout(120000), stopWaitingOnCancel: true },
 			);
 			return {
+				supportsLoad: initialized.agentCapabilities?.loadSession === true,
 				request: (m, p, o) =>
 					connection.agent.request(m, p, {
 						cancellationSignal: o?.signal,
@@ -87,19 +93,51 @@ export async function permissionDecision(
 	signal?: AbortSignal,
 ): Promise<RequestPermissionResponse> {
 	if (signal?.aborted) return { outcome: { outcome: "cancelled" } };
+	const description = permissionDescription(request);
+	if (!description) return { outcome: { outcome: "cancelled" } };
 	const options = request.options.filter(
 		(option) => option.kind === "allow_once" || option.kind === "reject_once",
 	);
-	const labels = options.map((option, index) => `${index + 1}. ${option.name}`);
+	if (!options.length) return { outcome: { outcome: "cancelled" } };
+	const labels = options.map((option, index) => `${index + 1}. ${JSON.stringify(option.name)}`);
 	let selected: string | undefined;
 	try {
-		selected = await choose(request.toolCall.title || "ACP tool permission", labels);
+		selected = await choose(description, labels);
 	} catch {
 		/* Deny on UI failure. */
 	}
 	const index = selected === undefined ? -1 : labels.indexOf(selected);
 	if (signal?.aborted || index < 0) return { outcome: { outcome: "cancelled" } };
 	return { outcome: { outcome: "selected", optionId: options[index].optionId } };
+}
+
+export function permissionDescription(request: RequestPermissionRequest): string | undefined {
+	const call = request.toolCall;
+	if (!call.title?.trim() || !call.kind) return;
+	const input = call.rawInput && typeof call.rawInput === "object" ? call.rawInput : undefined;
+	const details = { input, locations: call.locations, proposed: call.content };
+	if (!Object.values(details).some((value) => value && Object.keys(value).length)) return;
+	if (call.kind === "execute" && !hasCommand(input)) return;
+	const text = JSON.stringify(details, null, 2);
+	// Do not hide consequential arguments by truncating an approval preview.
+	if (text.length > 16000) return;
+	try {
+		assertNoSecrets({ title: call.title, details, options: request.options });
+	} catch {
+		return;
+	}
+	const risk = ["execute", "edit", "delete", "move"].includes(call.kind)
+		? "May execute commands or change files. Inspect arguments and proposed changes."
+		: "Check target paths and access scope.";
+	return `${JSON.stringify(call.title)} (${call.kind})\n${risk}\nPermission applies only to this invocation.\n${text}`;
+}
+
+function hasCommand(input: unknown): boolean {
+	if (!input || typeof input !== "object") return false;
+	return Object.entries(input).some(
+		([key, value]) =>
+			/command|cmd|args|argv|script/i.test(key) && !!value && JSON.stringify(value).length > 2,
+	);
 }
 
 export function discoveredModels(
@@ -130,14 +168,19 @@ export class AcpSession {
 		private factory: AcpFactory,
 		private cwd: string,
 		private choose: (title: string, options: string[]) => Promise<string | undefined>,
+		private recovery?: {
+			saved?: { sessionId: string; cwd: string };
+			save(binding: { sessionId: string; cwd: string }): void;
+			report(message: string): void;
+		},
 	) {}
 
-	async discover(): Promise<ReturnType<typeof discoveredModels>> {
-		await this.ensureSession();
+	async discover(fresh = false): Promise<ReturnType<typeof discoveredModels>> {
+		await this.ensureSession(fresh);
 		return discoveredModels(this.session!);
 	}
 
-	private async ensureSession(): Promise<void> {
+	private async ensureSession(fresh: boolean): Promise<void> {
 		if (this.session) return;
 		try {
 			this.port = await this.factory({
@@ -149,11 +192,7 @@ export class AcpSession {
 						? permissionDecision(request, this.choose, this.aborted)
 						: Promise.resolve({ outcome: { outcome: "cancelled" } }),
 			});
-			this.session = await this.port.request(
-				"session/new",
-				{ cwd: this.cwd, mcpServers: [] },
-				{ signal: AbortSignal.timeout(15000) },
-			);
+			this.session = await this.openSession(fresh);
 			if (!this.session?.modes?.availableModes.some((mode) => mode.id === "default"))
 				throw new Error("Prompting mode unavailable");
 			await this.port.request(
@@ -161,10 +200,44 @@ export class AcpSession {
 				{ sessionId: this.session.sessionId, modeId: "default" },
 				{ signal: AbortSignal.timeout(15000) },
 			);
+			this.recovery?.save({ sessionId: this.session!.sessionId, cwd: this.cwd });
 		} catch {
 			this.close();
 			throw new Error("ACP session initialization failed; prompting mode is required");
 		}
+	}
+
+	private async openSession(fresh: boolean): Promise<NewSessionResponse> {
+		const saved = this.recovery?.saved;
+		if (saved && !fresh) {
+			if (saved.cwd !== this.cwd || !this.port!.supportsLoad) {
+				this.recovery!.report(
+					"Official runtime cannot restore this ACP session. Local history and /handoff remain available. Use /poly-google-discover new to authorize a fresh session.",
+				);
+				throw new Error("ACP restoration unavailable");
+			}
+			try {
+				const loaded = await this.port!.request(
+					"session/load",
+					{ sessionId: saved.sessionId, cwd: this.cwd, mcpServers: [] },
+					{ signal: AbortSignal.timeout(15000) },
+				);
+				this.recovery!.report(
+					"Official ACP session/load succeeded; local Pi history remains authoritative.",
+				);
+				return { ...loaded, sessionId: saved.sessionId };
+			} catch {
+				this.recovery!.report(
+					"ACP restoration failed. Saved binding and Pi history were preserved. Prepare /handoff and explicitly authorize /poly-google-discover new.",
+				);
+				throw new Error("ACP restoration failed");
+			}
+		}
+		return this.port!.request(
+			"session/new",
+			{ cwd: this.cwd, mcpServers: [] },
+			{ signal: AbortSignal.timeout(15000) },
+		);
 	}
 
 	async prompt(
@@ -174,7 +247,8 @@ export class AcpSession {
 		update: (event: SessionNotification) => void,
 	): Promise<string> {
 		if (this.active) throw new Error("ACP already has an active user turn");
-		await this.ensureSession();
+		if (!this.session)
+			throw new Error("Run /poly-google-discover to authorize session initialization or recovery");
 		const selected = discoveredModels(this.session!).find((m) => m.id === model);
 		if (!selected) throw new Error("Model was not discovered from the official runtime");
 		if (signal?.aborted) throw new Error("Cancelled");

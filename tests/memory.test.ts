@@ -48,7 +48,7 @@ test("checkpoint uses MemPalace checkpoint and preserves source and certainty", 
 	await memory.save(h);
 	assert.equal(calls[0].name, "mempalace_checkpoint");
 	assert.equal(calls[0].args.items[0].wing, "pi_project");
-	assert.deepEqual(JSON.parse(calls[0].args.items[0].content), h);
+	assert.deepEqual(JSON.parse(calls[0].args.items.at(-1).content), h);
 	assert.equal(
 		checkpointDigest(h),
 		checkpointDigest({ ...h, provenance: { ...h.provenance, createdAt: "later" } }),

@@ -36,9 +36,9 @@ Do not activate this integration merely to run the automated tests. They use moc
 
 No executable is started during bootstrap, provider registration, startup, or ordinary model selection. Discovery requires a direct UI command and confirmation. It may require the runtime's native login if the prior login expired. A runtime without personal OAuth, a prompting mode, or model configuration options fails closed.
 
-Models come from the runtime's `model` configuration options. This slice exposes Gemini models only. The discovery command replaces the locked placeholder in Pi's picker. Runtime session context persists only for the current Pi process. After restarting, rediscover the models and use an explicit handoff to continue. No private Google session identifier is copied into another provider.
+Models come from the runtime's `model` configuration options. This slice exposes Gemini models only. The discovery command replaces the locked placeholder in Pi's picker. Pi stores the ACP session identifier and project directory in its own session history for recovery. After restarting, explicit discovery attempts documented `session/load` only when the runtime advertises it. Unsupported or failed restoration preserves local state and requires `/poly-google-discover new` plus confirmation to create a replacement. `/handoff` remains available. No private Google session identifier is copied into another provider.
 
-The adapter currently supports text prompts, streamed reasoning, tool activity, approval prompts, and cancellation. Wait for or cancel the active Google turn before submitting another prompt. Queued and steering prompts are refused in this slice. It does not implement image prompts, quota display, ACP session restoration across processes, or Pi-owned tools inside the Google agent. Displayed token and cost values are unavailable and remain zero; they are not a statement about subscription cost or remaining quota. The conservative Pi context limit is 128,000 tokens, not a claim about the model's actual context window.
+The adapter currently supports text prompts, streamed reasoning, tool activity, approval prompts, and cancellation. Wait for or cancel the active Google turn before submitting another prompt. Queued and steering prompts are refused in this slice. It does not implement image prompts, quota display, unadvertised or draft resume protocols, or Pi-owned tools inside the Google agent. Displayed token and cost values are unavailable and remain zero; they are not a statement about subscription cost or remaining quota. The conservative Pi context limit is 128,000 tokens, not a claim about the model's actual context window.
 
 ## Review Claude subscription use
 
@@ -68,3 +68,18 @@ Run validation and restart Pi. The executable must match the policy checksum. Re
 `src/policy.ts` rejects Anthropic authentication and gateway variables, Google or Gemini billing overrides, ACP overrides, bridge debugging flags, OpenAI API keys and endpoint overrides, proxy variables, custom CA injection, unsafe Node configuration, and coding-provider endpoint overrides. It does not silently unset them.
 
 Run `npm run validate` for variable names only. Correct the intended launch environment yourself. Missing or malformed configuration, a changed runtime checksum, or an unknown project `.pi` settings file prevents managed launch. Your existing files remain intact.
+
+## Delegation capabilities
+
+| Provider                              | Direct parent interaction          | Native Pi worker     | Restriction                                                              |
+| ------------------------------------- | ---------------------------------- | -------------------- | ------------------------------------------------------------------------ |
+| Codex                                 | After supported login              | Allowed              | ChatGPT OAuth only, guarded request, fresh child session                 |
+| Kimi                                  | After supported login              | Allowed              | OAuth by default; coding-plan key needs explicit opt-in                  |
+| Z.AI                                  | After coding-plan opt-in           | Allowed after opt-in | Coding endpoint only; key billing agreement must be verified by you      |
+| Claude SDK                            | Locked until authorized activation | Blocked              | Direct activation does not authorize subscription-backed delegation      |
+| Google consumer ACP                   | Locked until authorized activation | Forbidden            | Direct human input only; no model-generated or automated handoff prompts |
+| Custom APIs and open-weight endpoints | Unconfigured                       | Blocked              | Needs a separate explicitly authorized provider instance                 |
+
+Codex, Kimi, and opted-in Z.AI parents can request the `delegate_task` tool, subject to interactive approval. A user can invoke delegation commands while another direct provider is selected, but only an authorized native worker is dispatched. Worker role configuration never changes these capabilities. Read-only roles cannot become builders by editing configuration.
+
+No provider/model fallback is selected when child initialization, authentication, or execution fails. Native provider transports receive `maxRetries: 0`. Child sessions share Pi's supported isolated credential store through its SDK; tokens are not copied into task records, tool environments, or memory.

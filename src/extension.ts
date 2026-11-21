@@ -1,3 +1,5 @@
+import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
+import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
@@ -12,6 +14,7 @@ import {
 	ACP_PROVIDER,
 	BRIDGE_PROVIDER,
 	assertEnvironment,
+	assertInvocationEnvironment,
 	assertRequest,
 	guardedProvider,
 	providerStatus,
@@ -24,6 +27,7 @@ import {
 	ProjectMemory,
 	projectIdentity,
 	checkpointDigest,
+	checkpointBeforeCompaction,
 	validateHandoff,
 	type Handoff,
 	type MemoryTransport,
@@ -42,6 +46,7 @@ export default async function polyExtension(
 	let recalled = "";
 	let handoff: Handoff | undefined;
 	let savedDigest = "";
+	let acpBinding: { sessionId: string; cwd: string } | undefined;
 
 	const check = (provider: string) => {
 		assertEnvironment(process.env);
@@ -101,7 +106,7 @@ export default async function polyExtension(
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})),
 		streamSimple: (model, context, options) => {
-			assertEnvironment(process.env);
+			assertInvocationEnvironment(options);
 			assertRequest(
 				ACP_PROVIDER,
 				loadPolicy(profile),
@@ -128,6 +133,7 @@ export default async function polyExtension(
 				memoryTransport,
 				project.wing,
 				policy.memory.sharedWings,
+				policy.memory.contextBudget,
 			).recall(query);
 			context.ui.notify(
 				"Project memory retrieved. /memory-show previews it; /handoff-use places it in your editor.",
@@ -139,9 +145,17 @@ export default async function polyExtension(
 	}
 
 	pi.on("session_start", async (_event, context) => {
+		acp?.close();
+		acp = undefined;
+		directPrompt = undefined;
+		handoff = undefined;
+		savedDigest = "";
+		acpBinding = undefined;
 		ctx = context;
 		const entries = context.sessionManager.getBranch();
 		for (const entry of entries) {
+			if (entry.type === "custom" && entry.customType === "poly-acp-binding")
+				acpBinding = entry.data as typeof acpBinding;
 			if (entry.type === "custom" && entry.customType === "poly-handoff")
 				handoff = validateHandoff(entry.data);
 			if (entry.type === "custom" && entry.customType === "poly-checkpoint")
@@ -215,7 +229,7 @@ export default async function polyExtension(
 	});
 	pi.registerCommand("poly-google-discover", {
 		description: "Explicitly start the reviewed official ACP runtime and discover Gemini models",
-		handler: async (_args, context) => {
+		handler: async (args, context) => {
 			assertRequest(ACP_PROVIDER, policy, context.hasUI && context.mode === "tui");
 			if (
 				!(await context.ui.confirm(
@@ -229,9 +243,17 @@ export default async function polyExtension(
 				acpFactory || officialAcpFactory(policy.google, context.cwd),
 				context.cwd,
 				(title, choices) => context.ui.select(title, choices),
+				{
+					saved: acpBinding,
+					save: (binding) => {
+						acpBinding = binding;
+						pi.appendEntry("poly-acp-binding", binding);
+					},
+					report: (message) => context.ui.notify(message, "info"),
+				},
 			);
 			try {
-				const models = await acp.discover();
+				const models = await acp.discover(args.trim() === "new");
 				if (!models.length) throw new Error("No Gemini models");
 				pi.registerProvider(ACP_PROVIDER, googleConfig(models));
 				context.ui.notify("Gemini models discovered. Choose one with /model.", "info");
@@ -257,23 +279,14 @@ export default async function polyExtension(
 				provider: context.model?.provider || "unknown",
 				createdAt: new Date().toISOString(),
 			};
-			const draft = handoff || {
-				version: 1,
-				objective: "",
-				completed: [],
-				decisions: [],
-				questions: [],
-				files: [],
-				facts: [],
-				hypotheses: [],
-			};
+			const draft = draftHandoff(context.sessionManager.getBranch(), provenance, recalled, handoff);
 			const edited = await context.ui.editor(
-				"Handoff JSON: facts require text, source, verified. Never include secrets.",
-				JSON.stringify({ ...draft, provenance }, null, 2),
+				"Review handoff: facts use text | source. Agent summaries remain unverified.",
+				handoffMarkdown(draft),
 			);
 			if (!edited) return;
 			try {
-				const next = validateHandoff({ ...JSON.parse(edited), provenance });
+				const next = parseHandoffMarkdown(edited, provenance);
 				if (
 					!(await context.ui.confirm(
 						"Keep this checkpoint?",
@@ -342,6 +355,35 @@ export default async function polyExtension(
 				);
 		},
 	});
+	pi.on("session_before_compact", async (event, context) => {
+		const allowed = await checkpointBeforeCompaction(
+			{
+				manual: event.reason === "manual",
+				willRetry: event.willRetry,
+				interactive: context.hasUI && context.mode === "tui",
+				provider: context.model?.provider || "",
+				memoryEnabled: loadPolicy(profile).memory.enabled,
+				handoff,
+			},
+			() =>
+				context.ui.confirm(
+					"Checkpoint before compaction?",
+					"Persist the reviewed /handoff to MemPalace, then allow this manual compaction? Automatic replay stays disabled.",
+				),
+			async (h) => {
+				memoryTransport ??= await connectMemPalace();
+				await new ProjectMemory(memoryTransport, projectIdentity(context.cwd).wing).save(h);
+			},
+		);
+		if (!allowed) {
+			context.ui.notify(
+				"Compaction canceled. Prepare /handoff and enable MemPalace for an explicit checkpoint. Google ACP and automatic recovery compaction remain disabled.",
+				"warning",
+			);
+			return { cancel: true };
+		}
+	});
+	registerOrchestration(pi, profile, () => (handoff ? JSON.stringify(handoff) : recalled));
 	pi.on("session_shutdown", async () => {
 		acp?.close();
 		await memoryTransport?.close();
