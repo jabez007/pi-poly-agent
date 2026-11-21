@@ -1,0 +1,8 @@
+node_modules
+.poly
+package-lock.json
+LICENSE
+.git
+.agents
+.codex
+.aws
