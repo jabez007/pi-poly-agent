@@ -1,4 +1,4 @@
-# Qualify a native coding-plan provider
+# Qualify a provider deliberately
 
 These procedures make real requests only when you submit prompts or approve worker launches yourself. No provider has been live-qualified by this repository's automated tests.
 
@@ -10,9 +10,10 @@ Generate a plan without authentication or network requests:
 npm run qualify -- openai-codex
 npm run qualify -- kimi-coding
 npm run qualify -- zai
+npm run qualify -- YOUR_CONFIGURED_LOCAL_OR_API_INSTANCE
 ```
 
-Each plan lists 13 scenarios with `not-run` outcomes and empty evidence fields. It is a checklist, not an execution command or a qualification certificate. Claude and Google are excluded. Their activation reviews remain separate.
+Each plan lists 13 scenarios with `not-run` outcomes and empty evidence fields. It is a checklist, not an execution command or a qualification certificate. The custom-instance plan supports the built-in OpenAI-compatible adapter. Other trusted adapters require manual procedures with their documented runtime. Claude and Google are excluded. Their activation reviews remain separate.
 
 Use a disposable, clean repository with a committed test fixture. Use the isolated profile, supported `/login`, and enumerated `/model` IDs. Confirm the account's coding subscription or coding-plan billing before starting. Z.AI and Kimi key authentication require the opt-ins described in [providers](providers.md). Never inspect or copy credential stores to establish authentication availability.
 
@@ -58,3 +59,11 @@ Inspect retained work before replacing a failed task. A generation may have chan
 A local OpenAI-compatible instance has also been exercised through Pi's real transport against a loopback fake server. It uses no account and does not qualify a real hosted model or API billing agreement.
 
 The local startup observation is unauthenticated. Shared sandbox tests do not establish any provider's live behavior. Plans and fixtures never change these classifications automatically.
+
+## Qualify a local or API endpoint
+
+Use explicit model IDs and declared context limits. There is no automatic `/models` discovery in the compatible adapter. Verify these values against the server before executing tests. For local instances, confirm a loopback URL and no subscription credentials. For API instances, confirm separate billing activation and use the instance's own supported Pi login.
+
+Run the same streaming, tool, cancellation, independent-session, failure, and review scenarios in a disposable repository. In particular, verify JSON tool arguments and the actual model context limit. An OpenAI-compatible URL does not establish these capabilities. Do not deliberately exhaust quota or provoke billable failures. Record endpoint version, model ID, instance, billing mode, and observed evidence without credentials.
+
+Offline tests use a loopback fixture with no GPU or model server. HTTP 401, 429, 503, malformed SSE, unavailable endpoints, cancellation, model metadata overrides, unsupported tool capabilities, and multiple instances are tested without authenticated accounts. Those results establish client behavior, not compatibility with an untested endpoint.

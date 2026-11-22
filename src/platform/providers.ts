@@ -1,4 +1,4 @@
-import { createProvider, type Provider } from "@earendil-works/pi-ai";
+import { createProvider, getDeclaredTools, type Provider } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
@@ -22,6 +22,7 @@ export interface ProviderInstance {
 	capabilities?: Partial<Capabilities>;
 	endpoint?: string;
 	models?: string[];
+	modelLimits?: { contextWindow: number; maxTokens: number };
 }
 export interface ProviderAdapter {
 	id: string;
@@ -96,8 +97,8 @@ function compatible(instance: ProviderInstance): Provider {
 			baseUrl: endpoint,
 			reasoning: false,
 			input: ["text"],
-			contextWindow: 32000,
-			maxTokens: 8192,
+			contextWindow: instance.modelLimits?.contextWindow ?? 32000,
+			maxTokens: instance.modelLimits?.maxTokens ?? 8192,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})),
 		api: openAICompletionsApi(),
@@ -112,6 +113,15 @@ export function validateInstanceDefinition(instance: ProviderInstance): void {
 	if (typeof instance.enabled !== "boolean" || !["local", "api"].includes(instance.billing))
 		throw new Error("Custom instances require explicit activation and local or API billing");
 	if (instance.endpoint) safeEndpoint(instance.endpoint, instance.billing === "local");
+	if (
+		instance.modelLimits &&
+		(!Number.isInteger(instance.modelLimits.contextWindow) ||
+			!Number.isInteger(instance.modelLimits.maxTokens) ||
+			instance.modelLimits.contextWindow < 256 ||
+			instance.modelLimits.maxTokens < 1 ||
+			instance.modelLimits.maxTokens > instance.modelLimits.contextWindow)
+	)
+		throw new Error("Invalid explicit provider model limits");
 	validateInstanceModels(instance);
 }
 function validateInstanceModels(instance: ProviderInstance): void {
@@ -179,6 +189,7 @@ export class ProviderRegistry {
 			if (typeof base[key] === "boolean")
 				(base as any)[key] = instance.enabled && instance.capabilities?.[key] !== false;
 		base.nativeSubagents = false;
+		base.persistentSessions = false;
 		base.billing = instance.enabled ? instance.billing : "locked";
 		return base;
 	}
@@ -193,7 +204,7 @@ export class ProviderRegistry {
 		const caps = this.capabilities(id);
 		if (!instance.enabled || !(direct ? caps.direct : caps.delegation && caps.background))
 			throw new Error("Provider is not authorized for delegated execution");
-		if (!direct && depth !== 1) throw new Error("Delegation depth is limited to one");
+		if (!direct) assertWorkerRuntime(caps, depth);
 	}
 	provider(id: string, direct = false, factory?: (id: string) => Provider): Provider {
 		this.assert(id, 1, direct);
@@ -207,7 +218,10 @@ export class ProviderRegistry {
 			safeEndpoint(provider.baseUrl, instance.billing === "local");
 		if (!reserved.includes(id) && provider.auth.oauth)
 			throw new Error("Custom providers cannot install subscription authentication");
-		return guardedProvider(provider, () => this.assert(id, 1, direct));
+		return guardedProvider(
+			reserved.includes(id) ? provider : validateInvocation(provider, this.capabilities(id)),
+			() => this.assert(id, 1, direct),
+		);
 	}
 	resolve(
 		selection: { instance?: string; requires?: string[] },
@@ -228,4 +242,39 @@ export class ProviderRegistry {
 		const caps = this.capabilities(id);
 		return caps.delegation && required.every((key) => (caps as any)[key] === true);
 	}
+}
+
+/** Validate custom requests at transport invocation, including forged model metadata and unsupported tools. */
+function validateInvocation(provider: Provider, capabilities: Capabilities): Provider {
+	const check = (model: any, context: any) => {
+		const registered = provider.getModels().find((m) => m.id === model.id);
+		if (
+			!registered ||
+			["provider", "baseUrl", "api", "contextWindow", "maxTokens"].some(
+				(key) => model[key] !== (registered as any)[key],
+			)
+		)
+			throw new Error(
+				"Unregistered model or model metadata override refused; no substitution selected",
+			);
+		if (!capabilities.tools && getDeclaredTools(context.messages).length)
+			throw new Error("Provider tools capability is disabled");
+	};
+	return {
+		...provider,
+		stream: (...args) => {
+			check(args[0], args[1]);
+			return provider.stream(...args);
+		},
+		streamSimple: (...args) => {
+			check(args[0], args[1]);
+			return provider.streamSimple(...args);
+		},
+	};
+}
+
+function assertWorkerRuntime(caps: Capabilities, depth: number): void {
+	if (!caps.streaming || !caps.cancellation)
+		throw new Error("Delegated Pi sessions require streaming and cancellation support");
+	if (depth !== 1) throw new Error("Delegation depth is limited to one");
 }

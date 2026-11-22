@@ -1,3 +1,4 @@
+import { nativeWorkerInstructions } from "../platform/pi-resources.ts";
 import { agentPolicy, effectivePolicy } from "../platform/contracts.ts";
 import { ProviderRegistry, nativeWorkerProvider } from "../platform/providers.ts";
 import { emptyResources, workerTools, resourceInstructions } from "../platform/resources.ts";
@@ -96,8 +97,12 @@ export function createPiRunner(
 		});
 		await loader.reload();
 		const tests: string[] = [];
-		const selected = selectedTools(task, approve, tests, resources);
-		const instructions = resourceInstructions(task, resources);
+		const approvedResources = {
+			...resources,
+			skills: { ...resources.skills, ...(await nativeWorkerInstructions(task, profile)) },
+		};
+		const selected = selectedTools(task, approve, tests, approvedResources);
+		const instructions = resourceInstructions(task, approvedResources);
 		const { session, modelFallbackMessage } = await createAgentSession({
 			cwd: task.workspace.path,
 			agentDir: directory,

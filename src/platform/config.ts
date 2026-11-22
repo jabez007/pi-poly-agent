@@ -1,3 +1,4 @@
+import { nativePackageConfiguration } from "./pi-resources.ts";
 import { git } from "../orchestration/worktrees.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -284,15 +285,24 @@ function fileLayer(
 			"Project configuration cannot install providers, packages, or legacy privileges",
 		);
 	for (const packageFile of raw.packages || []) {
-		if (typeof packageFile !== "string" || !/^[a-z0-9-]+\.json$/.test(packageFile))
+		if (
+			typeof packageFile !== "string" ||
+			(!packageFile.startsWith("pi:") && !/^[a-z0-9-]+\.json$/.test(packageFile))
+		)
 			throw new Error(
 				"Packages must be installed JSON files in the managed profile packages directory",
 			);
-		const file = join(profile, "packages", packageFile);
+		const file = packageConfiguration(profile, packageFile);
 		apply(result, read(file), dirname(file), false);
 	}
 	apply(result, raw, dirname(file), project);
 }
+function packageConfiguration(profile: string, file: string): string {
+	return file.startsWith("pi:")
+		? nativePackageConfiguration(profile, file.slice(3))
+		: join(profile, "packages", file);
+}
+
 function apply(result: PlatformConfig, raw: any, base: string, project: boolean): void {
 	fields(
 		raw,
@@ -370,7 +380,16 @@ function applyProviders(result: PlatformConfig, raw: any, project: boolean): voi
 		for (const instance of raw.providers) {
 			fields(
 				instance,
-				["id", "adapter", "billing", "enabled", "capabilities", "endpoint", "models"],
+				[
+					"id",
+					"adapter",
+					"billing",
+					"enabled",
+					"capabilities",
+					"endpoint",
+					"models",
+					"modelLimits",
+				],
 				"provider instance",
 			);
 			result.providers = result.providers.filter((p) => p.id !== instance.id);

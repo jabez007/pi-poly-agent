@@ -31,7 +31,7 @@ The depth-one execution ceiling remains deliberate security policy, not an agent
 
 `resources.ts` resolves selected tools, skills, and instruction extensions. Built-in file tools remain scoped and tests remain approval-gated in Bubblewrap. Trusted custom tool declarations must fit effective permissions. Worker extensions contribute instructions, without gaining Pi provider hooks or unrestricted command registration. Approved parent integrations may use Pi's supported command/event interface for optional UI behavior.
 
-The managed launcher retains `.poly/agent`, disables discovered executable resources, and explicitly loads the platform extension. Trusted executable integrations require an absolute path and SHA-256 in the managed profile. They have application-process privileges; their entry checksums do not sandbox them or attest transitive imports. Project JSON cannot authorize them.
+The managed launcher retains `.poly/agent`, explicitly loads the platform extension, and uses native Pi resource discovery after user-resource trust acknowledgment. Project resources use Pi's native trust flow. Worker SDK sessions keep executable discovery disabled and accept selected native instructional snapshots. [Ecosystem integration](pi-ecosystem.md) records the pinned-source review and compatibility limits. Trusted executable integrations require an absolute path, SHA-256, and explicit application-code trust in the managed profile. Optional inventories cover reviewed local files. They have application-process privileges; their entry checksums do not sandbox them or attest transitive imports. Project JSON cannot authorize them.
 
 ## Ownership and lifecycle
 
@@ -39,7 +39,7 @@ Pi owns interactive history. The task system owns execution records, workflow ru
 
 Every graph step is a bounded independent task. `needs` controls ordering, `contextFrom` controls explicit transfer, `inspect` selects an exact task snapshot, and `distinctModelFrom` constrains independent model choice. Every dispatch uses a mandatory approval callback. Conditions inspect validated task outcomes; they do not infer correctness. Applying changes remains a separate confirmed action through the task integration interface.
 
-Task and workflow records publish through synced temporary files and atomic rename. The existing project host lease protects managed task ownership. Restart marks active tasks and workflow runs interrupted without replaying any model request. Inspection and approved replacement remain supported; true provider-session or workflow-step continuation is not claimed.
+Task and workflow records publish through synced temporary files and atomic rename. The existing project host lease protects managed task ownership. Restart marks active tasks and workflow runs interrupted without replaying any model request. Inspection and approved replacement remain supported; true provider-session continuation is not claimed. Explicit workflow continuation revalidates completed task artifacts, provider eligibility, and source revisions, then creates a linked run with fresh approvals for pending steps. Durable dispatch step identities reconcile a task completed before its workflow notification was persisted. Uncertain tasks are never replayed.
 
 ## Reused implementations
 

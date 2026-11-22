@@ -26,7 +26,13 @@ import {
 	guardedProvider,
 	providerStatus,
 } from "./policy.ts";
-import { PROFILE, loadPolicy, validateProfile, validateClaudeSettings } from "./profile.ts";
+import {
+	PROFILE,
+	loadPolicy,
+	validateProfile,
+	validateClaudeSettings,
+	validateProjectSafetySettings,
+} from "./profile.ts";
 import { AcpSession, officialAcpFactory, type AcpFactory } from "./providers/acp.ts";
 import { acpStream } from "./providers/stream.ts";
 import {
@@ -75,6 +81,7 @@ export default async function polyExtension(
 
 	const check = (provider: string) => {
 		assertEnvironment(process.env);
+		if (ctx) validateProjectSafetySettings(ctx.cwd);
 		if (provider === BRIDGE_PROVIDER) validateClaudeSettings();
 		assertRequest(provider, loadPolicy(profile));
 	};
@@ -178,6 +185,7 @@ export default async function polyExtension(
 		handoff = undefined;
 		savedDigest = "";
 		acpBinding = undefined;
+		validateProjectSafetySettings(context.cwd);
 		ctx = context;
 		const entries = context.sessionManager.getBranch();
 		for (const entry of entries) {

@@ -1,10 +1,16 @@
 import { validateIntegrations } from "../src/platform/integrations.ts";
 import { loadPlatform } from "../src/platform/config.ts";
-import { ProviderRegistry, validateInstanceDefinition } from "../src/platform/providers.ts";
+import { validateInstanceDefinition } from "../src/platform/providers.ts";
+import {
+	ResourceTrustRequired,
+	assertInteractiveResourceTrust,
+	trustInteractiveResources,
+	validateProjectSafetySettings,
+} from "../src/profile.ts";
 import { qualificationPlan } from "../src/orchestration/qualification.ts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bootstrap, PROFILE, validateProfile, assertSafeProfile } from "../src/profile.ts";
 import { assertEnvironment, conflictingEnvironment } from "../src/policy.ts";
@@ -38,10 +44,7 @@ export function validateDependencies(): void {
 	}
 }
 
-export function launchArguments(
-	args: string[],
-	providers = ["openai-codex", "kimi-coding", "zai", "claude-bridge", "antigravity-acp"],
-): string[] {
+export function launchArguments(args: string[], _providers?: string[]): string[] {
 	const accepted: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -49,42 +52,33 @@ export function launchArguments(
 			accepted.push(arg);
 			continue;
 		}
+		if (arg === "--model" && /^[\w-]+\/[\w.:[\]-]+$/.test(args[i + 1] || "")) {
+			accepted.push(arg, args[++i]);
+			continue;
+		}
 		if (
-			arg === "--model" &&
-			/^[\w-]+\/[\w.:[\]-]+$/.test(args[i + 1] || "") &&
-			providers.includes((args[i + 1] || "").split("/")[0])
+			["-e", "--extension", "--skill", "--prompt-template", "--theme", "--use-theme"].includes(
+				arg,
+			) &&
+			args[i + 1] &&
+			!args[i + 1].startsWith("-")
 		) {
 			accepted.push(arg, args[++i]);
 			continue;
 		}
+		if (["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"].includes(arg)) {
+			accepted.push(arg);
+			continue;
+		}
 		throw new Error(
-			"Managed launch accepts only --continue, --resume, and --model provider/model. Enter prompts inside Pi.",
+			"Managed launch accepts session, model and native resource flags. Enter prompts inside Pi; automation modes are disabled.",
 		);
 	}
-	return [
-		"--offline",
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-themes",
-		"-e",
-		join(ROOT, "src/extension.ts"),
-		...accepted,
-	];
+	return ["--offline", "-e", join(ROOT, "src/extension.ts"), ...accepted];
 }
 
 export function assertProjectConfiguration(cwd: string): void {
-	// Pi can merge project settings before extensions load. Refuse unknown executable configuration.
-	let directory = resolve(cwd);
-	while (directory !== dirname(directory)) {
-		for (const name of ["settings.json", "models.json", "mcp.json"]) {
-			if (existsSync(join(directory, ".pi", name)))
-				throw new Error(
-					"Existing project .pi configuration needs review before managed launch; it was preserved",
-				);
-		}
-		directory = dirname(directory);
-	}
+	validateProjectSafetySettings(cwd);
 }
 
 export function selectRecipe(recipe: string, profile = PROFILE): void {
@@ -141,13 +135,16 @@ export async function main(args: string[]): Promise<void> {
 		selectRecipe(args[1]);
 		return;
 	}
+	if (command === "pi") {
+		await runNativePi(args.slice(1));
+		return;
+	}
 	const policy = validateProfile();
 	const platform = loadPlatform(PROFILE);
 	validateIntegrations(PROFILE);
-	const providers = new ProviderRegistry(() => validateProfile());
 	for (const instance of platform.providers) validateInstanceDefinition(instance);
 	if (command === "qualify") {
-		console.log(JSON.stringify(qualificationPlan(args[1], policy), null, 2));
+		console.log(JSON.stringify(qualificationPlan(args[1], policy, platform.providers), null, 2));
 		return;
 	}
 	if (command === "validate") {
@@ -160,21 +157,32 @@ export async function main(args: string[]): Promise<void> {
 	assertProjectConfiguration(process.cwd());
 	if (!process.stdin.isTTY || !process.stdout.isTTY)
 		throw new Error("Managed Pi launch requires an interactive terminal");
+	const trusted = args.includes("--trust-native-resources");
+	const launch = launchArguments(args.slice(1).filter((arg) => arg !== "--trust-native-resources"));
+	if (trusted) trustInteractiveResources(PROFILE);
+	assertInteractiveResourceTrust(PROFILE);
+	await spawnPi(launch);
+}
+
+/** Forward resource management to the pinned Pi CLI. Installation is an explicit trusted-code action. */
+export async function runNativePi(args: string[]): Promise<void> {
+	if (!["install", "remove", "list", "config"].includes(args[0]))
+		throw new Error("Native resource commands: pi install, remove, list, config");
+	bootstrap();
+	if (["install", "config"].includes(args[0])) {
+		console.log(
+			"Native Pi resources run as trusted application code. Installation may run dependency scripts. Workers do not inherit these extensions or privileges.",
+		);
+		trustInteractiveResources(PROFILE);
+	}
+	await spawnPi(args);
+}
+async function spawnPi(args: string[]): Promise<void> {
 	const cli = join(ROOT, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-	const child = spawn(
-		process.execPath,
-		[
-			cli,
-			...launchArguments(
-				args.slice(1),
-				[...providers.list(), ...platform.providers].map((p) => p.id),
-			),
-		],
-		{
-			stdio: "inherit",
-			env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
-		},
-	);
+	const child = spawn(process.execPath, [cli, ...args], {
+		stdio: "inherit",
+		env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
+	});
 	const forward = (signal: NodeJS.Signals) => {
 		if (child.exitCode === null) child.kill(signal);
 	};
@@ -194,9 +202,11 @@ export async function main(args: string[]): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-	main(process.argv.slice(2)).catch(() => {
+	main(process.argv.slice(2)).catch((error) => {
 		console.error(
-			"Managed operation failed. Check Node >=22.19, npm ci --ignore-scripts, profile configuration, and npm run validate. Diagnostic values were withheld.",
+			error instanceof ResourceTrustRequired
+				? error.message
+				: "Managed operation failed. Check Node >=22.19, npm ci --ignore-scripts, profile configuration, and npm run validate. Diagnostic values were withheld.",
 		);
 		process.exitCode = 1;
 	});

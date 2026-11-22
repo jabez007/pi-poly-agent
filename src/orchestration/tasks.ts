@@ -52,6 +52,7 @@ export interface TaskResult {
 export interface Task {
 	id: string;
 	parent: string;
+	workflowStep?: string;
 	role: Role;
 	provider: string;
 	model: string;
@@ -99,6 +100,7 @@ export interface RunInput {
 export type TaskRunner = (input: RunInput) => Promise<TaskResult>;
 export interface Dispatch {
 	parent: string;
+	workflowStep?: string;
 	role: Role;
 	provider: string;
 	model: string;
@@ -286,6 +288,33 @@ export class TaskManager {
 		});
 		return structuredClone(task);
 	}
+	/** Recovery validates current policy and exact retained source, without dispatching anything. */
+	validateCheckpoint(id: string, role: Role): Task {
+		const task = this.get(id);
+		this.registry.assert(task.provider, task.depth);
+		assertAgentModel({ ...task, role }, this.registry.capabilities(task.provider));
+		if (!existsSync(task.workspace.path))
+			throw new Error("Workflow checkpoint worktree missing; inspect its retained branch manually");
+		const revision = task.revision || task.workspace.base;
+		if (
+			git(task.workspace.root, ["rev-parse", "HEAD"]) !== (task.reviewBase || task.workspace.base)
+		)
+			throw new Error(
+				"Workflow checkpoint parent revision changed; inspect retained work manually",
+			);
+		if (
+			git(task.workspace.path, ["rev-parse", "HEAD"]) !== revision ||
+			git(task.workspace.path, ["branch", "--show-current"]) !== task.workspace.branch ||
+			git(task.workspace.path, ["status", "--porcelain"])
+		)
+			throw new Error(
+				"Workflow checkpoint source changed or worktree is unavailable; inspect it manually",
+			);
+		if (task.status !== "completed" || !task.result || !task.artifacts?.length)
+			throw new Error("Workflow checkpoint requires a completed task and retained artifacts");
+		return task;
+	}
+
 	private admit(input: Dispatch): Dispatch {
 		const execution = effectivePolicy(
 			agentPolicy(input.role),

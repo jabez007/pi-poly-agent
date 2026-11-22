@@ -1,6 +1,6 @@
 # Pi Poly Agent
 
-A composable, terminal-native orchestration platform around Pi Coding Agent. Configure ordinary Pi with several providers, occasional delegation, or a specialized agent team without changing the orchestration core.
+Pi with optional, composable multi-provider orchestration. Configure ordinary Pi with several providers, occasional delegation, or a specialized agent team without changing the orchestration core.
 
 Pi owns the TUI, agent loop, model picker, tools, and conversation history. Pi Poly Agent adds guarded provider instances, configurable agents, bounded workflows, durable tasks, isolated Git worktrees, and optional project context. There is no separate frontend or orchestration daemon.
 
@@ -21,6 +21,18 @@ npm start
 The `minimal` recipe has no agent definitions, workflows, external memory, or worker status display. Use Pi's `/login` for native Codex or Kimi authentication and `/model` to switch. Z.AI requires coding-plan opt-in. Claude SDK and Google ACP start locked. See [provider setup](docs/providers.md).
 
 Existing profiles without platform configuration retain the v0.3 compatibility agents and commands. Nothing migrates or deletes task history automatically.
+
+## Bring your Pi customizations
+
+Use native Pi packages, extensions, skills, prompt templates, and themes in the interactive session:
+
+```bash
+npm run pi -- install /absolute/path/to/reviewed/package
+npm run pi -- config
+npm start
+```
+
+The commands use the pinned Pi CLI and isolated profile. Installation is a trusted-code decision. Existing resources that were previously suppressed require `npm start -- --trust-native-resources` once. Project resources use Pi's own trust prompt. Personal credentials are never copied. [Native resource compatibility](docs/pi-ecosystem.md) covers personal references, package contributions, worker restrictions, and the compatibility matrix. See [v0.4.1 migration](docs/migration-v041.md) before activating existing resources or integrations.
 
 ## Compose agents and workflows
 
@@ -57,7 +69,7 @@ Editing permissions come from intersected policies, not agent names. Agents may 
 
 ## Reliability and account protections
 
-Tasks retain source changes, results, artifacts, session references, and exact review revisions across restart. Interrupted tasks remain visible. Recovery launches a separately approved replacement; it does not claim to restore provider-private execution state. Workflow runs also become interrupted after restart, without automatic replay.
+Tasks retain source changes, results, artifacts, session references, and exact review revisions across restart. Interrupted tasks remain visible. Recovery launches a separately approved replacement; it does not claim to restore provider-private execution state. Workflow runs also become interrupted after restart, without automatic replay. `/workflow-runs RUN_ID continue` can create an explicitly approved linked run from validated completed steps; uncertain workers require explicit task recovery.
 
 Every task uses an isolated Git worktree. Consequential test commands require single-use approval and Linux Bubblewrap. Tests have no network or host credentials, and failed sandbox startup never falls back to an unrestricted shell. Dependency preparation is explicit. See [workflows and recovery](docs/workflows.md).
 

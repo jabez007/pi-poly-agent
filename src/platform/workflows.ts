@@ -32,6 +32,8 @@ export interface WorkflowDefinition {
 }
 export interface WorkflowRun {
 	id: string;
+	continuedFrom?: string;
+	continuedBy?: string;
 	definition: WorkflowDefinition;
 	input: string;
 	parent: string;
@@ -136,22 +138,41 @@ export class WorkflowEngine {
 	list(): WorkflowRun[] {
 		return structuredClone([...this.runs.values()]);
 	}
-	start(definition: WorkflowDefinition, input: string, parent: string): WorkflowRun {
+	start(
+		definition: WorkflowDefinition,
+		input: string,
+		parent: string,
+		checkpoint?: WorkflowRun,
+	): WorkflowRun {
 		validateWorkflow(definition, this.agents);
 		if (!input.trim() || input.length > 6000) throw new Error("Workflow input exceeds task budget");
+		if (checkpoint && this.runs.get(checkpoint.id) !== checkpoint)
+			throw new Error("Use continueRun to validate checkpoint reuse");
 		assertNoSecrets({ definition, input });
 		const run: WorkflowRun = {
 			id: randomUUID(),
+			continuedFrom: checkpoint?.id,
 			definition: structuredClone(definition),
 			input,
 			parent,
 			status: "running",
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
-			steps: Object.fromEntries(definition.steps.map((s) => [s.id, { status: "pending" }])),
+			steps: Object.fromEntries(
+				definition.steps.map((s) => [
+					s.id,
+					checkpoint?.steps[s.id].status === "completed"
+						? structuredClone(checkpoint.steps[s.id])
+						: { status: "pending" },
+				]),
+			),
 		};
 		this.runs.set(run.id, run);
 		this.persist(run);
+		if (checkpoint) {
+			checkpoint.continuedBy = run.id;
+			this.persist(checkpoint);
+		}
 		const slot = { signal: new AbortController(), done: Promise.resolve() };
 		this.active.set(run.id, slot);
 		slot.done = this.execute(run, slot.signal.signal)
@@ -162,6 +183,64 @@ export class WorkflowEngine {
 			.finally(() => this.active.delete(run.id));
 		return structuredClone(run);
 	}
+	/** Explicit replacement run. Completed tasks are reused; pending work always receives fresh approval. */
+	continueRun(id: string, parent: string, approved: boolean): WorkflowRun {
+		const original = this.runs.get(id);
+		if (!approved || !original || original.status !== "interrupted")
+			throw new Error("Only an explicitly approved interrupted workflow can continue");
+		if (original.continuedBy || [...this.runs.values()].some((run) => run.continuedFrom === id))
+			throw new Error(
+				"Workflow already has a continuation; inspect its linked run instead of replaying pending steps",
+			);
+		validateWorkflow(original.definition, this.agents);
+		for (const step of original.definition.steps) this.validateRecoveryStep(original, step);
+		return this.start(original.definition, original.input, parent, original);
+	}
+	private validateRecoveryStep(run: WorkflowRun, step: WorkflowStep): void {
+		const state = run.steps[step.id];
+		if (!state.task) state.task = this.recoverDispatch(run, step);
+		if (!state.task) return;
+		let task = this.tasks.get(state.task);
+		if (task.replacedBy) {
+			const replacement = this.tasks.get(task.replacedBy);
+			if (replacement.replacementOf !== task.id)
+				throw new Error("Invalid replacement task relationship");
+			task = replacement;
+		}
+		// Reconcile an interrupted completion notification from durable task state, without a request replay.
+		if (task.status === "completed") {
+			const agent = this.agents.find((a) => a.name === step.agent)!;
+			if (
+				task.role.name !== agent.name ||
+				(step.model && step.model !== `${task.provider}/${task.model}`)
+			)
+				throw new Error("Workflow checkpoint agent or model mismatch");
+			this.tasks.validateCheckpoint(task.id, agent);
+			if (this.outcome(task, step) !== "completed")
+				throw new Error("Workflow recovery requires retained artifact contracts");
+			state.status = "completed";
+			state.task = task.id;
+			return;
+		}
+		throw new Error(
+			"Workflow contains unfinished worker execution. Recover or replace its task explicitly; continuation cannot replay uncertain operations.",
+		);
+	}
+
+	private recoverDispatch(run: WorkflowRun, step: WorkflowStep): string | undefined {
+		const known = new Set(Object.values(run.steps).map((s) => s.task));
+		const orphans = this.tasks
+			.list()
+			.filter((t) => t.parent === `workflow:${run.id}` && !known.has(t.id));
+		if (orphans.some((t) => !t.workflowStep))
+			throw new Error(
+				"Unlinked legacy workflow task requires manual reconciliation; replay refused",
+			);
+		const matches = orphans.filter((t) => t.workflowStep === step.id);
+		if (matches.length > 1) throw new Error("Ambiguous workflow dispatch history; replay refused");
+		return matches[0]?.id;
+	}
+
 	async wait(id: string): Promise<WorkflowRun> {
 		await this.active.get(id)?.done;
 		const run = this.runs.get(id);
@@ -301,6 +380,7 @@ export class WorkflowEngine {
 		context = taskContext(context, undefined, agentPolicy(agent).contextBudget);
 		return {
 			parent: `workflow:${run.id}`,
+			workflowStep: step.id,
 			role: agent,
 			provider: chosen.slice(0, slash),
 			model: chosen.slice(slash + 1),

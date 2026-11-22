@@ -1,4 +1,5 @@
 import { defaultPolicy, type Policy } from "../policy.ts";
+import { ProviderRegistry, type ProviderInstance } from "../platform/providers.ts";
 import { providerCapabilities } from "./capabilities.ts";
 export const QUALIFICATION_SCENARIOS = [
 	[
@@ -52,14 +53,25 @@ export const QUALIFICATION_SCENARIOS = [
 	],
 ] as const;
 /** Offline planning only. It neither resolves credentials nor instantiates an authenticated model runtime. */
-export function qualificationPlan(provider: string, policy: Policy = defaultPolicy()) {
-	if (!["openai-codex", "kimi-coding", "zai"].includes(provider))
-		throw new Error("Qualification supports only native Codex, Kimi, and Z.AI coding plans");
+export function qualificationPlan(
+	provider: string,
+	policy: Policy = defaultPolicy(),
+	instances: ProviderInstance[] = [],
+) {
+	const instance = instances.find((p) => p.id === provider);
+	if (!["openai-codex", "kimi-coding", "zai"].includes(provider) && !instance)
+		throw new Error(
+			"Qualification supports native coding plans or explicitly configured custom instances; subscription runtimes remain blocked",
+		);
+	const registry = new ProviderRegistry(() => policy);
+	if (instance) registry.register(instance);
 	return {
 		provider,
 		mode: "manual-live-plan",
 		performed: "No authentication, login, inference, or subscription requests were made.",
-		capabilities: providerCapabilities(provider, policy),
+		capabilities: instance
+			? registry.capabilities(provider)
+			: providerCapabilities(provider, policy),
 		prerequisites: [
 			"Review docs/qualification.md first",
 			"Use a disposable clean Git repository",
@@ -68,7 +80,12 @@ export function qualificationPlan(provider: string, policy: Policy = defaultPoli
 		],
 		scenarios: QUALIFICATION_SCENARIOS.map(([id, procedure]) => ({
 			id,
-			procedure,
+			procedure:
+				id === "authentication" && instance
+					? instance.billing === "local"
+						? "Verify the configured loopback endpoint and explicit model list. No subscription credential is used."
+						: "Review API billing activation, then use Pi /login for this instance. Never use coding-subscription credentials."
+					: procedure,
 			outcome: "not-run",
 			evidence: "",
 		})),

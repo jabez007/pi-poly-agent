@@ -67,7 +67,7 @@ Run validation and restart Pi. The executable must match the policy checksum. Re
 
 `src/policy.ts` rejects Anthropic authentication and gateway variables, Google or Gemini billing overrides, ACP overrides, bridge debugging flags, OpenAI API keys and endpoint overrides, proxy variables, custom CA injection, unsafe Node configuration, and coding-provider endpoint overrides. It does not silently unset them.
 
-Run `npm run validate` for variable names only. Correct the intended launch environment yourself. Missing or malformed configuration, a changed runtime checksum, or an unknown project `.pi` settings file prevents managed launch. Your existing files remain intact.
+Run `npm run validate` for variable names only. Correct the intended launch environment yourself. Missing or malformed configuration, a changed runtime checksum, or a project `.pi` safety override prevents managed launch. Native project resources otherwise use Pi's trust decision. Your existing files remain intact.
 
 ## Delegation capabilities
 
@@ -95,3 +95,9 @@ Native worker failures have fixed, secret-screened categories and explicit recov
 Provider instances advertise direct interaction, delegation, concurrency, streaming, cancellation, tools, editing/read-only execution, persistence, handoffs, and billing classification. Native subscription restrictions cannot be overridden by instance declarations. Custom adapters cannot register OAuth or replace reserved providers. Exact endpoint and environment checks run again at the request boundary.
 
 The native Codex/Kimi/Z.AI scenarios remain mock-tested only. A fake loopback OpenAI-compatible server also exercises Pi's real transport, local instance registration, and independent worker execution without credentials. This does not qualify a hosted model, inference gateway, subscription, or billing agreement. Continue using the [opt-in qualification procedure](qualification.md) before relying on live accounts.
+
+## Native custom providers and qualification
+
+Trusted parent Pi extensions can register providers through normal `pi.registerProvider`, without a Poly adapter. Such registration does not authorize workers. Worker eligibility requires a reviewed registry adapter that can reuse the same Pi provider factory, explicit instance activation, and central policy validation. Built-in separately billed providers remain disabled by the managed extension; arbitrary trusted host code is not sandboxed.
+
+Compatible endpoint tests use loopback HTTP fixtures for explicit models and limits, streaming, fragmented tool arguments, errors, malformed events, cancellation, and separate instances. They do not qualify a real server. Configure a local or API instance, then run `npm run qualify -- INSTANCE` for a manual checklist without authentication or inference. No automatic discovery request, provider substitution, or subscription credential reuse occurs. See [qualification](qualification.md).

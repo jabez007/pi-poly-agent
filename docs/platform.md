@@ -50,7 +50,7 @@ Use `instructionsFile: "instructions/database.md"` instead of inline instruction
 
 `permissions` supports `read`, `write`, and `test`. Omitted permissions default to read-only, including profiles that configure other execution limits. `test` also requires `read` and `write`, because arbitrary test programs read and modify source. The same permission intersection protects controller preparation commands. Tests always need separate interactive approval and Bubblewrap. Built-in tools are `read`, `write`, `edit`, `run_test`, and `review_diff`. A tool must be selected and its required permissions must survive every applicable restriction.
 
-`policy.skills` and `policy.extensions` select trusted resource identifiers. Unknown identifiers fail before prompting a model. Skills are approved text, and worker extensions are instruction contributions. Arbitrary Pi hooks, subprocess tools, MCP discovery, credential resources, and recursive delegation remain unavailable inside workers. A trusted tool registration may add behavior within its declared permissions. Its implementation is trusted application code and requires review.
+`policy.skills` and `policy.extensions` select trusted resource identifiers. Skills can also reference `pi:skill:NAME` or `pi:prompt:NAME` using [native Pi discovery](pi-ecosystem.md#select-worker-instructions). Unknown identifiers fail before prompting a model. Skills are approved text, and worker extensions are instruction contributions. Arbitrary Pi hooks, subprocess tools, MCP discovery, credential resources, and recursive delegation remain unavailable inside workers. A trusted tool registration may add behavior within its declared permissions. Its implementation is trusted application code and requires review.
 
 Only `workspace: "isolated"` and `sandbox: "bubblewrap"` are currently supported. Limits allow one delegation level, 1–4 concurrent tasks, 1–3600 seconds, and 256–16000 context characters. Pi's existing task manager enforces global and task limits. Token budgets are not exposed because a reliable per-session token ceiling has not been implemented.
 
@@ -123,7 +123,7 @@ For a locally hosted OpenAI-compatible model, add this to trusted user or manage
 }
 ```
 
-The adapter uses Pi's existing OpenAI completions transport. It does not host a model or discover endpoint models automatically. Local endpoints must use loopback. Remote compatible endpoints use HTTPS, `billing: "api"`, and explicit `enabled: true`. `/login INSTANCE` accepts a separately authorized API key through Pi's secret input and native credential store. It does not read ambient OpenAI API keys or borrow subscription credentials. Disabled instances cannot execute. Model IDs and endpoints never silently change.
+The adapter uses Pi's existing OpenAI completions transport. It does not host a model or discover endpoint models automatically. Local endpoints must use loopback. Remote compatible endpoints use HTTPS, `billing: "api"`, and explicit `enabled: true`. `/login INSTANCE` accepts a separately authorized API key through Pi's secret input and native credential store. It does not read ambient OpenAI API keys or borrow subscription credentials. Disabled instances cannot execute. Model IDs and endpoints never silently change. Optional `modelLimits: { "contextWindow": 4096, "maxTokens": 1024 }` sets declared limits for the instance. Defaults remain 32000 and 8192. These declarations do not prove a server's limits. Unknown model IDs and forged limit metadata fail at invocation. Compatible instances do not claim provider-private session persistence.
 
 Multiple instances can use the same adapter. Optional boolean `capabilities` only restrict advertised operations. Known Claude, Google, Codex, Kimi, and Z.AI instance identifiers and adapters cannot be replaced. Custom adapters cannot declare subscription authentication or install OAuth. Consumer subscription endpoints cannot be registered as compatible API instances.
 
@@ -131,7 +131,7 @@ Multiple instances can use the same adapter. Optional boolean `capabilities` onl
 
 ## Install trusted integrations and packages
 
-Copy reviewed JSON packages into `.poly/agent/packages/NAME.json` and list their filenames under `packages` in trusted configuration. Packages define agents, workflows, policy, or provider instances. They are not npm installers and never execute shell commands. There is no automatic download or package update mechanism.
+Prefer native Pi package installation with an explicit `pi:SOURCE` configuration reference, described in [native package contributions](pi-ecosystem.md#distribute-orchestration-with-a-pi-package). Legacy standalone configuration remains supported: copy reviewed JSON into `.poly/agent/packages/NAME.json` and list their filenames under `packages` in trusted configuration. Packages define agents, workflows, policy, or provider instances. They are not npm installers and never execute shell commands. There is no automatic download or package update mechanism.
 
 For executable integrations, create a reviewed module with this contract:
 
@@ -160,11 +160,17 @@ Record its absolute path and SHA-256 in `.poly/agent/integrations.json`:
 ```json
 {
 	"version": 1,
-	"modules": [{ "path": "/ABSOLUTE/PATH/integration.mjs", "sha256": "REPLACE_WITH_64_HEX_SHA256" }]
+	"modules": [
+		{
+			"path": "/ABSOLUTE/PATH/integration.mjs",
+			"sha256": "REPLACE_WITH_64_HEX_SHA256",
+			"trust": "application-code"
+		}
+	]
 }
 ```
 
-The manifest itself and each module path reject symlinks. Checksums are verified before import. The module exports `version = 1` and `setup(IntegrationHost)`. It can register providers, tools, context backends, and instruction resources. Project JSON cannot install or import it. Review module dependencies too; the entry checksum does not attest its entire import graph. These modules have normal application privileges and are trusted code. `IntegrationHost.ui` exposes Pi's native command and event registration for optional parent UI customization. It does not register worker providers or grant worker tools.
+The manifest itself and each module path reject symlinks. Checksums are verified before import. The module exports `version = 1` and `setup(IntegrationHost)`. It can register providers, tools, context backends, and instruction resources. Project JSON cannot install or import it. Review module dependencies too; the entry checksum does not attest its entire import graph. Optional `root` and `files` inventories detect added, removed, or changed local files. [Integrity limits](security.md#integration-integrity-in-v041) remain explicit. These modules have normal application privileges and are trusted code. `IntegrationHost.ui` exposes Pi's native command and event registration for optional parent UI customization. It does not register worker providers or grant worker tools.
 
 The managed launcher explicitly loads this manifest through `src/extension.ts`; no core edits are required. Validation checks JSON, integration entry checksums, and dependency pins without executing integration modules. Adapter existence and registered resource identifiers are checked when the managed extension and worker initialize. Restart Pi after changing provider registrations or executable integrations.
 

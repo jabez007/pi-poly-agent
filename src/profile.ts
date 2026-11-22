@@ -1,4 +1,3 @@
-import { loadPlatform } from "./platform/config.ts";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
@@ -12,9 +11,6 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
 	conflictingEnvironment,
-	NATIVE_PROVIDERS,
-	BRIDGE_PROVIDER,
-	ACP_PROVIDER,
 	defaultPolicy,
 	validatePolicy,
 	type Activation,
@@ -60,26 +56,27 @@ export function bootstrap(profile = PROFILE): void {
 function validateSettings(file: string): void {
 	if (lstatSync(file).isSymbolicLink()) throw new Error("Managed settings must not be a symlink");
 	const settings = readConfiguration(file) as Record<string, unknown>;
-	const mutable = [
-		"defaultProvider",
-		"defaultModel",
-		"defaultThinkingLevel",
-		"modelThinkingLevels",
-		"lastChangelogVersion",
-		"theme",
-		"hideThinkingBlock",
-	];
-	for (const [key, value] of Object.entries(SETTINGS)) {
-		if (key === "defaultProvider") continue;
-		if (JSON.stringify(settings[key]) !== JSON.stringify(value))
-			throw new Error("Managed settings differ; existing configuration was left untouched");
+	if (!settings || typeof settings !== "object" || Array.isArray(settings))
+		throw new Error("Managed settings must be a JSON object");
+	validateSafetySettings(settings);
+	for (const key of ["compaction", "retry", "cacheWarming"] as const)
+		if (settings[key] === undefined)
+			throw new Error("Managed safety setting missing; existing configuration was left untouched");
+}
+
+/** Native Pi owns resource and display settings. These execution safeguards remain fixed. */
+export function validateSafetySettings(settings: Record<string, any>): void {
+	for (const key of ["compaction", "retry", "cacheWarming"] as const) {
+		if (
+			settings[key] !== undefined &&
+			JSON.stringify(settings[key]) !== JSON.stringify(SETTINGS[key])
+		)
+			throw new Error("Managed safety settings differ; existing configuration was left untouched");
 	}
-	const allowed = [...NATIVE_PROVIDERS, BRIDGE_PROVIDER, ACP_PROVIDER] as unknown[];
-	allowed.push(...loadPlatform(dirname(file)).providers.map((p) => p.id));
-	if (!allowed.includes(settings.defaultProvider))
-		throw new Error("Default provider is outside the managed profile");
-	if (Object.keys(settings).some((key) => !(key in SETTINGS) && !mutable.includes(key)))
-		throw new Error("Unreviewed profile settings were left untouched");
+	if (settings.httpProxy || settings.defaultProjectTrust === "always")
+		throw new Error(
+			"Proxy overrides and automatic project trust require a separate reviewed environment",
+		);
 }
 
 export function loadPolicy(profile = PROFILE): Policy {
@@ -121,7 +118,7 @@ export function validateProfile(profile = PROFILE): Policy {
 	if (!existsSync(join(profile, "settings.json")))
 		throw new Error("Missing profile; run bootstrap first");
 	validateSettings(join(profile, "settings.json"));
-	for (const name of ["models.json", "mcp.json", "extensions", "SYSTEM.md", "APPEND_SYSTEM.md"]) {
+	for (const name of ["models.json"]) {
 		if (existsSync(join(profile, name)))
 			throw new Error("Unexpected profile resource; manual review required");
 	}
@@ -152,4 +149,39 @@ export function validateClaudeSettings(
 		if (settings.env && conflictingEnvironment(settings.env as NodeJS.ProcessEnv).length)
 			throw new Error("Claude native settings contain conflicting environment overrides");
 	}
+}
+
+export function validateProjectSafetySettings(cwd: string): void {
+	const file = join(resolve(cwd), ".pi/settings.json");
+	if (existsSync(file)) validateSafetySettings(readConfiguration(file) as Record<string, unknown>);
+}
+
+export class ResourceTrustRequired extends Error {
+	constructor() {
+		super(
+			"Native Pi resources have application-process privileges. Review this profile's packages/extensions/MCP configuration, then launch with --trust-native-resources once. No resources were loaded. See docs/pi-ecosystem.md.",
+		);
+	}
+}
+/** User-owned trust acknowledgment, separate from Pi's native per-project trust store. */
+export function trustInteractiveResources(profile: string): void {
+	assertSafeProfile(profile);
+	const file = join(profile, "interactive-trust.json");
+	assertSafeProfile(file);
+	createOrCheck(file, { version: 1, nativeResources: "trusted-application-code" });
+}
+export function assertInteractiveResourceTrust(profile: string): void {
+	const settings = readConfiguration(join(profile, "settings.json")) as Record<string, any>;
+	const executable =
+		settings.extensions?.length ||
+		settings.packages?.length ||
+		existsSync(join(profile, "extensions")) ||
+		existsSync(join(profile, "mcp.json"));
+	if (!executable) return;
+	const file = join(profile, "interactive-trust.json");
+	if (!existsSync(file)) throw new ResourceTrustRequired();
+	assertSafeProfile(file);
+	const trust = readConfiguration(file) as any;
+	if (trust.version !== 1 || trust.nativeResources !== "trusted-application-code")
+		throw new ResourceTrustRequired();
 }

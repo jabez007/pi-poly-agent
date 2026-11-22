@@ -144,12 +144,11 @@ test("launcher rejects automation flags and preserves project settings", () => {
 	assert.throws(() => assertNode("22.16.0"), /22.19/);
 	assert.doesNotThrow(() => assertNode("22.21.1"));
 	assert.ok(
-		launchArguments(["--continue", "--model", "openai-codex/example"]).includes("--no-extensions"),
+		!launchArguments(["--continue", "--model", "openai-codex/example"]).includes("--no-extensions"),
 	);
 	for (const args of [
 		["-p", "prompt"],
 		["--mode", "rpc"],
-		["-e", "other.ts"],
 		["--provider", "google"],
 		["delegated task"],
 	])
@@ -157,7 +156,7 @@ test("launcher rejects automation flags and preserves project settings", () => {
 	const root = mkdtempSync(join(tmpdir(), "poly-project-"));
 	mkdirSync(join(root, ".pi"));
 	writeFileSync(join(root, ".pi/settings.json"), '{"packages":["personal"]}');
-	assert.throws(() => assertProjectConfiguration(root), /preserved/);
+	assert.doesNotThrow(() => assertProjectConfiguration(root));
 	assert.equal(readFileSync(join(root, ".pi/settings.json"), "utf8"), '{"packages":["personal"]}');
 });
 

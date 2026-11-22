@@ -12,6 +12,7 @@ import { createPiRunner, nativeWorkerProvider } from "../src/orchestration/runne
 import { git } from "../src/orchestration/worktrees.ts";
 import { scopedTools } from "../src/orchestration/tools.ts";
 import {
+	nativeWorkerInstructions,
 	loadPlatform,
 	ProviderRegistry,
 	WorkflowEngine,
@@ -241,7 +242,7 @@ test("provider instances share adapters, resolve capabilities deterministically 
 	);
 });
 
-function mockProvider(id: string): Provider {
+function mockProvider(id: string, observe?: (context: unknown) => void): Provider {
 	const base = nativeWorkerProvider("openai-codex");
 	const model = {
 		...base.getModels()[0],
@@ -249,7 +250,8 @@ function mockProvider(id: string): Provider {
 		provider: id,
 		baseUrl: "http://127.0.0.1:1/v1",
 	};
-	const stream = () => {
+	const stream = (_model?: unknown, context?: unknown) => {
+		observe?.(context);
 		const events = createAssistantMessageEventStream();
 		queueMicrotask(() => {
 			const message: any = {
@@ -296,9 +298,19 @@ test("public provider and resource contracts execute an unknown agent in a real 
 	const { root, profile } = fixture();
 	const policy = defaultPolicy();
 	const registry = new ProviderRegistry(() => policy);
+	let observedNativeSkill = false;
+	mkdirSync(join(profile, "skills", "native-evidence"), { recursive: true });
+	writeFileSync(
+		join(profile, "skills", "native-evidence", "SKILL.md"),
+		"---\nname: native-evidence\ndescription: Native worker evidence\n---\nNative real worker evidence.\n",
+	);
 	registry.registerAdapter({
 		id: "fixture-adapter",
-		create: (instance) => mockProvider(instance.id),
+		create: (instance) =>
+			mockProvider(instance.id, (context) => {
+				assert.match(JSON.stringify(context), /Native real worker evidence/);
+				observedNativeSkill = true;
+			}),
 	});
 	registry.register({
 		id: "fixture-instance",
@@ -313,7 +325,7 @@ test("public provider and resource contracts execute an unknown agent in a real 
 	agent.policy = {
 		permissions: ["read"],
 		tools: ["read", "describe_project"],
-		skills: ["source-reading"],
+		skills: ["source-reading", "pi:skill:native-evidence"],
 		extensions: ["output-convention"],
 	};
 	resources.tools.push({
@@ -349,6 +361,7 @@ test("public provider and resource contracts execute an unknown agent in a real 
 			}).id,
 		);
 		assert.equal(task.status, "completed", JSON.stringify(task));
+		assert.equal(observedNativeSkill, true);
 		assert.ok(task.sessionFile);
 		assert.ok(task.artifacts?.some((a) => a.kind === "summary" && a.certainty === "claim"));
 		const session = readFileSync(task.sessionFile!, "utf8");
@@ -359,7 +372,13 @@ test("public provider and resource contracts execute an unknown agent in a real 
 			tools.map((t) => t.name),
 			["read", "describe_project"],
 		);
-		assert.match(resourceInstructions(task, resources), /source-reading/);
+		assert.match(
+			resourceInstructions(task, {
+				...resources,
+				skills: { ...resources.skills, ...(await nativeWorkerInstructions(task, profile)) },
+			}),
+			/source-reading/,
+		);
 		resources.tools[0].permissions = ["write"];
 		assert.throws(() => workerTools(task, [], resources), /escalation/);
 	} finally {
@@ -691,14 +710,23 @@ test("attested integration modules load only from the managed profile and checks
 	writeFileSync(module, code);
 	writeFileSync(
 		join(profile, "integrations.json"),
-		JSON.stringify({ version: 1, modules: [{ path: module, sha256: "0".repeat(64) }] }),
+		JSON.stringify({
+			version: 1,
+			modules: [{ path: module, trust: "application-code", sha256: "0".repeat(64) }],
+		}),
 	);
 	await assert.rejects(loadIntegrations(profile, new ProviderRegistry(defaultPolicy)), /checksum/);
 	writeFileSync(
 		join(profile, "integrations.json"),
 		JSON.stringify({
 			version: 1,
-			modules: [{ path: module, sha256: createHash("sha256").update(code).digest("hex") }],
+			modules: [
+				{
+					path: module,
+					trust: "application-code",
+					sha256: createHash("sha256").update(code).digest("hex"),
+				},
+			],
 		}),
 	);
 	const installed = await loadIntegrations(profile, new ProviderRegistry(defaultPolicy));

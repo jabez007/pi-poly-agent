@@ -135,3 +135,52 @@ The named-agent restriction regression was observed failing when restriction ret
 Two bootstrap runs and profile validation passed. Validation explicitly removed an inherited conflicting Anthropic key from that child invocation only; no account configuration or persistent environment was changed. The real managed Pi TUI loaded, displayed `/agents` capabilities and locked Claude/Google status, and exited without a prompt or login. Native model-unavailable warnings reflect the unauthenticated profile. An existing tmux extended-key warning was left unchanged.
 
 `npm audit --json` reported zero advisories. Clean installation still warned about deprecated ESLint 9 and node-domexception; dependency upgrades remain separate work. Gitleaks 8.30.1 reported no candidates or warnings in a temporary filesystem copy of tracked and unignored source. Dependencies, ignored profiles, and Git history were excluded from that scan. No credential validation, live provider request, palace initialization, or real MemPalace write occurred.
+
+## Native Pi host and worker trust in v0.4.1
+
+The interactive process now accepts ordinary native resources. Previously suppressed user packages/extensions/MCP require explicit acknowledgment through `--trust-native-resources` or native install/config commands. That acknowledgment trusts enabled user code and its later changes. It is separate from Pi's own project trust store. Startup remains offline, installation is explicit, and project trust cannot silently become `always` through managed settings. [Native resources](pi-ecosystem.md) describes activation and limitations.
+
+A trusted parent extension has application authority. It can read files, spawn processes, access the host environment, replace providers, and change hooks. Pi Poly Agent cannot sandbox it or make central functions non-bypassable against malicious code already executing in the same process. Package installation and executable imports are trust decisions. Do not install code you would not run yourself. Native project trust prevents untrusted project extensions from silently executing; granting trust knowingly changes that authority.
+
+Restricted workers do not import those extensions. Native skill/prompt discovery is data-only, uses already installed package paths, and obeys saved project trust. Selected files reject symlinks and secrets. Supporting scripts are not executed or mounted. Skills cannot grant tools, filesystem access, providers, or approval bypasses. Scoped file tools and approved Bubblewrap tests remain the enforced paths for model-directed actions.
+
+Trusted custom tool implementations and provider factories remain application code too. Their metadata controls eligibility, not their arbitrary Node.js behavior. Review them before registration. The platform rejects unknown registrations, resource escalation, native subscription aliases, incompatible model metadata, and unsupported declared operations through its execution interfaces. It does not claim to contain malicious trusted implementations that deliberately avoid those interfaces.
+
+Claude and Google safeguards remain unchanged. Google consumer ACP cannot be delegated to, including through skill text, custom instances, workflows, or context transfer. Claude subscription workers remain blocked. No authentication store is copied, no provider is automatically substituted, no API billing fallback is enabled, and no authenticated qualification runs during CI.
+
+## Integration integrity in v0.4.1
+
+Every executable `integrations.json` entry now requires `"trust": "application-code"` as well as its entry path and SHA-256. Missing acknowledgment fails before import. Existing manifests are preserved and receive a validation error instead of an implicit trust grant.
+
+Optional `root` and `files` describe a reviewed local directory:
+
+```json
+{
+	"path": "/reviewed/integration/entry.mjs",
+	"sha256": "ENTRY_SHA256",
+	"trust": "application-code",
+	"root": "/reviewed/integration",
+	"files": {
+		"entry.mjs": "ENTRY_SHA256",
+		"helper.mjs": "HELPER_SHA256",
+		"package.json": "PACKAGE_SHA256",
+		"package-lock.json": "LOCK_SHA256"
+	}
+}
+```
+
+Replace each placeholder with its reviewed 64-character lowercase digest. The entry must appear in the inventory. Validation detects added, removed, changed, symlinked, or special files before import. Inventories allow at most 512 files and 32 nested directory levels. Changed approvals during a running process require restart to avoid stale module caches. The source is [integration loading](../src/platform/integrations.ts).
+
+The inventory attests only the named directory. JavaScript can import built-ins, packages, absolute files, dynamic dependencies, or code outside it. Neither inventory validation nor a lockfile proves that the entire runtime import graph was reviewed or remains immutable. Use exact versions, review lockfile integrity and installation scripts, provision dependencies with scripts disabled where possible, keep reviewed code read-only, and explicitly trust remaining imports. Validation is not a cryptographic package manager, filesystem race defense, or execution sandbox.
+
+Native Pi packages keep their own installation and dependency behavior. The repository's application dependencies remain pinned in `package-lock.json`, with scripts disabled by its normal installation procedure. Native packages are separately installed trusted code; application lockfile integrity does not attest them.
+
+## v0.4.1 verification evidence
+
+Against Pi SDK/CLI 1.5.2 on Node 22.21.1, `npm ci --ignore-scripts --offline` succeeded and `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 100 tests with no skips. The 79 baseline tests remain, with 21 new ecosystem, custom-transport, and workflow-continuation tests. The SDK fixture consumes a native skill inside an independent worker. Native command collisions use Pi's disambiguated invocation names; native provider registration does not confer delegation eligibility.
+
+Recovery fixtures cover sequential and parallel checkpoints, approval gates, lost completion notifications, the dispatch/persistence crash gap, uncertain execution, changed provider policy, stale source, missing artifact contracts, completed Codex/Kimi implementation/inspection snapshots, and refusal to continue the same source run twice. A review-checkpoint regression failed before correcting validation to use the original parent base, then passed. Loopback transport fixtures cover streamed text, fragmented JSON tool arguments, HTTP 401/429/503, malformed SSE, cancellation, unavailable endpoints, metadata overrides, and separate instances. Native extension fixtures exercise untrusted project code, worker filesystem/process/credential/provider attempts, explicit user trust, and resource reload/filtering.
+
+Two bootstrap runs preserved the actual profile. Validation rejected an inherited `ANTHROPIC_API_KEY` by name, then passed in a child process omitting only that variable. The original environment and credential stores were untouched. The native `pi list` command succeeded, and qualification printed only `not-run` scenarios. No provider account, real model endpoint, or MemPalace server was contacted.
+
+The corrected lockfile changes only the application's version; every dependency entry matches v0.4. A current `npm audit` reported zero advisories. Installation still reports the existing ESLint 9 and node-domexception deprecation warnings. Gitleaks 8.30.1 found no candidates or warnings in a temporary snapshot of tracked and unignored source, excluding profiles, dependencies, and history. No credentials were validated or revoked. These checks do not establish live provider or third-party package qualification.

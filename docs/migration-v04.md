@@ -24,8 +24,8 @@ The legacy `/implement` command is now an alias for `/workflow implementation-re
 
 Task JSON retains `role` as the historical assigned-agent field. New records add effective policy and artifacts. Existing records without those fields retain conservative compatibility permissions. Review/integration still checks the recorded snapshot and original base. Old `workflowReviewModel` values remain inspectable but do not restart a review offer automatically.
 
-Unfinished workflow runs become interrupted on restart. There is no automatic workflow or provider continuation. Inspect task IDs, preserved changes, and results before explicitly replacing a task or starting another run. Corrupt workflow records fail closed and remain on disk for manual inspection.
+Unfinished workflow runs become interrupted on restart. There is no automatic workflow or provider continuation. v0.4.1 adds [explicit validated workflow continuation](migration-v041.md). Inspect task IDs, preserved changes, and results before explicitly replacing a task or starting another run. Corrupt workflow records fail closed and remain on disk for manual inspection.
 
 Minimal configuration disables external context even if an earlier profile used MemPalace. To retain memory in an explicit configuration, add `context: ["native", "mempalace"]` and keep `memory.enabled` in `poly.json`. Project isolation, secret screening, reviewed `/handoff`, and manual `/memory-save` remain unchanged. The palace is never initialized or migrated.
 
-Keep executable integrations in the checksum-pinned managed-profile manifest. Do not move arbitrary `.pi/settings.json`, extension discovery, or provider credentials into project JSON. See [configuration and trust rules](platform.md).
+Keep executable integrations in the checksum-pinned managed-profile manifest. Native Pi settings and resources remain separate from orchestration JSON. v0.4.1 enables them through [the native trust path](pi-ecosystem.md). Do not move provider credentials into project JSON. See [configuration and trust rules](platform.md).

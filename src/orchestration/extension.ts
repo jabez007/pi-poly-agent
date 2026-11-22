@@ -439,11 +439,18 @@ export function registerOrchestration(
 		handler: workflow,
 	});
 	pi.registerCommand("workflow-runs", {
-		description: "Inspect or cancel durable workflow runs",
+		description: "Inspect, cancel, or explicitly continue interrupted workflow runs",
 		handler: async (args, ctx) => {
 			const [id, action] = args.trim().split(/\s+/);
 			const engine = workflowHost(ctx);
 			if (id && action === "cancel") await engine.cancel(id);
+			if (id && action === "continue") {
+				const approved = await ctx.ui.confirm(
+					"Continue interrupted workflow?",
+					"Reuse validated completed artifacts. Pending steps require new approval. No provider session is resumed and completed operations are not replayed.",
+				);
+				engine.continueRun(id, ctx.sessionManager.getSessionId(), approved);
+			}
 			ctx.ui.notify(JSON.stringify(engine.list(), null, 2), "info");
 		},
 	});

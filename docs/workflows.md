@@ -74,6 +74,14 @@ If lease acquisition itself was interrupted, Pi fails closed with the `host-acqu
 
 Interrupted integration is reported separately. Inspect the parent using `git status`, `git log`, and your normal Git tools before completing or aborting an unfinished cherry-pick yourself. Pi neither auto-replays integration nor claims to know whether an interrupted Git operation completed.
 
+## Continue an interrupted workflow
+
+Inspect `/workflow-runs` and its task IDs. Use `/workflow-runs RUN_ID continue`, confirm reuse, and approve each pending task separately. A new run retains `continuedFrom` and completed task references. It does not resume a provider session.
+
+Continuation checks current provider policy and agent model constraints, retained artifacts, task worktree branch/revision/cleanliness, and the parent revision. It reconciles completed task records even if a workflow completion notification was interrupted. New dispatches retain their workflow step ID, so a crash before workflow persistence can also be reconciled. Ambiguous legacy dispatches fail closed.
+
+An unfinished worker blocks continuation. Use explicit task recovery, inspect its completed replacement, then continue. Stale source, missing worktrees/artifacts, canceled workflows, changed eligibility, and unlinked legacy execution require manual inspection. Completed work is never automatically repeated.
+
 ## Preserve legacy configuration
 
 Optionally create `.poly/agent/orchestration.json`:

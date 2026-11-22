@@ -6,3 +6,4 @@ export * from "./workflows.ts";
 export * from "./config.ts";
 export * from "./resources.ts";
 export * from "./integrations.ts";
+export * from "./pi-resources.ts";

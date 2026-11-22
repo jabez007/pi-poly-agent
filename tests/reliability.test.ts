@@ -280,13 +280,13 @@ test("provider failures retain useful categories without raw bodies, retries, or
 	await manager.close();
 });
 
-test("qualification is a non-authenticated plan for native providers only", () => {
+test("qualification is a non-authenticated plan that excludes subscription runtimes", () => {
 	for (const provider of ["openai-codex", "kimi-coding", "zai"]) {
 		const plan = qualificationPlan(provider);
 		assert.equal(plan.scenarios.length, 13);
 		assert.ok(plan.scenarios.every((s) => s.outcome === "not-run"));
 	}
-	assert.throws(() => qualificationPlan("antigravity-acp"), /only native/);
+	assert.throws(() => qualificationPlan("antigravity-acp"), /remain blocked/);
 });
 
 test(
