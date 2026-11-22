@@ -47,11 +47,7 @@ export function nativePackageConfiguration(profile: string, source: string): str
 	return path;
 }
 
-/** Native discovery of data only. Installed packages become local paths, so missing sources cannot download. */
-export async function nativeInstructionLoader(
-	profile: string,
-	cwd: string,
-): Promise<DefaultResourceLoader> {
+function installedSettings(profile: string, cwd: string) {
 	const { settings, packages } = manager(profile, cwd);
 	const installed = packages.listConfiguredPackages();
 	const config = settings.getSettings();
@@ -67,10 +63,19 @@ export async function nativeInstructionLoader(
 		{ ...config, packages: sources },
 		{ projectTrusted: settings.isProjectTrusted() },
 	);
+	return { settings: snapshot, installed };
+}
+
+/** Native discovery of data only. Installed packages become local paths, so missing sources cannot download. */
+export async function nativeInstructionLoader(
+	profile: string,
+	cwd: string,
+): Promise<DefaultResourceLoader> {
+	const { settings } = installedSettings(profile, cwd);
 	const loader = new DefaultResourceLoader({
 		cwd,
 		agentDir: profile,
-		settingsManager: snapshot,
+		settingsManager: settings,
 		noExtensions: true,
 		noThemes: true,
 		noContextFiles: true,
