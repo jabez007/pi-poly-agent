@@ -148,11 +148,11 @@ Trusted custom tool implementations and provider factories remain application co
 
 Claude and Google safeguards remain unchanged. Google consumer ACP cannot be delegated to, including through skill text, custom instances, workflows, or context transfer. Claude subscription workers remain blocked. No authentication store is copied, no provider is automatically substituted, no API billing fallback is enabled, and no authenticated qualification runs during CI.
 
-## Integration integrity in v0.4.1
+## Executable integration integrity
 
-Every executable `integrations.json` entry now requires `"trust": "application-code"` as well as its entry path and SHA-256. Missing acknowledgment fails before import. Existing manifests are preserved and receive a validation error instead of an implicit trust grant.
+Executable `integrations.json` entries require a normalized absolute entry path, SHA-256 and `"trust": "application-code"`. Directory inventories are the default in v0.4.2. Existing complete `root`/`files` approvals with normalized entry paths remain valid. The user-owned managed profile is the only executable manifest source; project JSON cannot approve imports.
 
-Optional `root` and `files` describe a reviewed local directory:
+Use a dedicated reviewed directory and list every file under it:
 
 ```json
 {
@@ -169,11 +169,31 @@ Optional `root` and `files` describe a reviewed local directory:
 }
 ```
 
-Replace each placeholder with its reviewed 64-character lowercase digest. The entry must appear in the inventory. Validation detects added, removed, changed, symlinked, or special files before import. Inventories allow at most 512 files and 32 nested directory levels. Changed approvals during a running process require restart to avoid stale module caches. The source is [integration loading](../src/platform/integrations.ts).
+Replace each placeholder with its reviewed 64-character lowercase digest. The entry must appear in the inventory. Validation detects added, removed, changed, symlinked, or special files before import. Inventories allow at most 512 files and 32 nested directory levels. All approvals are validated before the first module executes, then each module is revalidated immediately before import. Digest reads refuse final-component symlinks and non-regular files. Changed approvals or failed initialization require restart to avoid stale module caches and repeated partial setup. Module paths reject non-normalized aliases. These checks reduce accidental substitution; they do not eliminate concurrent filesystem mutation. The source is [integration loading](../src/platform/integrations.ts).
 
-The inventory attests only the named directory. JavaScript can import built-ins, packages, absolute files, dynamic dependencies, or code outside it. Neither inventory validation nor a lockfile proves that the entire runtime import graph was reviewed or remains immutable. Use exact versions, review lockfile integrity and installation scripts, provision dependencies with scripts disabled where possible, keep reviewed code read-only, and explicitly trust remaining imports. Validation is not a cryptographic package manager, filesystem race defense, or execution sandbox.
+### Reapprove existing integrations
+
+For an old entry-only approval, review the entry and dependencies, create a `root`/`files` inventory and update the entry digest. The loader preserves the manifest and fails until this is done. If a directory inventory is impractical, explicitly set `"integrity": "entry-only-unverified-imports"` with no `root` or `files`. This narrower record acknowledges that imports and later dependency changes are not verified. `"trust": "application-code"` alone is no longer sufficient for entry-only loading.
+
+After a legitimate update, review the changed directory, refresh its exact file inventory and digests, and restart Pi. Run `npm run validate` before loading it. No reapproval command automatically hashes mutable code and calls it reviewed. Failed or changed modules cannot be repaired by hot reload. Task history, recipes, provider configuration and native resource trust markers need no migration.
+
+### What verification does not prove
+
+The inventory attests only the named directory. JavaScript can import built-ins, packages, absolute files, dynamic dependencies, or code outside it. Neither inventory validation nor a lockfile proves that the entire runtime import graph was reviewed or remains immutable. Use exact versions, review lockfile integrity and installation scripts, provision dependencies with scripts disabled where possible, keep reviewed code read-only, and explicitly trust remaining imports. npm records resolved package integrity in its [lockfile](https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json/); it does not attest arbitrary files used by executable code. The regression suite deliberately demonstrates that an import outside an inventoried directory remains application code rather than pretending to reject every dynamic dependency. Validation is not a cryptographic package manager, filesystem race defense, or execution sandbox.
 
 Native Pi packages keep their own installation and dependency behavior. The repository's application dependencies remain pinned in `package-lock.json`, with scripts disabled by its normal installation procedure. Native packages are separately installed trusted code; application lockfile integrity does not attest them.
+
+## v0.4.2 release verification
+
+The starting `main` revision was `345199f`. Installed Pi SDK and CLI both reported 1.5.2 on Node 22.21.1. Before implementation, `npm ci --ignore-scripts` and bootstrap passed. The first outer-sandbox test invocation failed five test files; the unchanged baseline passed all 100 tests after granting the subprocess and namespace access required by those fixtures. Validation rejected an inherited `ANTHROPIC_API_KEY` by name, then passed in a child omitting only that variable. No credential value was printed or copied.
+
+The final clean `npm ci --ignore-scripts --offline` installed 323 packages with scripts disabled. `PI_OFFLINE=1 PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint including complexity limit 12, formatting and all 123 tests with zero failures or skips. No changed function exceeds the complexity limit. The 23 added cases cover integrity/trust, native CLI and SDK compatibility, package contributions, worker resource restrictions and documentation/pin consistency. Two new regression tests failed against the original loader before passing with the fix.
+
+Two bootstrap runs and `npm run docs:check` passed. Codex, Kimi and Z.AI qualification commands each generated 13 `not-run` scenarios without authentication; Z.AI remained locked. Compatible-endpoint qualification remains covered by the existing offline plan fixture. The minimal/agent-team CI recipe command and actual Bubblewrap namespace probe also passed locally. The updated GitHub Actions workflow was parsed and its commands checked locally; its new hosted jobs have not run for this feature branch. Unsupported hosted namespaces produce an explicit warning and missing-coverage summary rather than a host-shell fallback.
+
+Every non-root lockfile entry matches v0.4.1. `npm audit --json` reported zero advisories at verification time. Existing ESLint 9 and node-domexception deprecation warnings remain; no dependency upgrade was bundled into this milestone. Gitleaks 8.30.1 reported no findings or warnings in an 83-file source snapshot, excluding ignored profiles, dependencies, Git metadata and history. No credential validation or revocation ran.
+
+No authenticated provider or MemPalace request ran. Live provider sessions, real network-installed Pi packages and full-screen terminal appearance remain unqualified. The [tested compatibility matrix](pi-ecosystem.md#compatibility-and-trust) distinguishes functional execution, data discovery and unverified behavior. See [v0.5 readiness](roadmap.md#v05-readiness) for remaining release limitations.
 
 ## v0.4.1 verification evidence
 

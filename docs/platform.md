@@ -164,15 +164,19 @@ Record its absolute path and SHA-256 in `.poly/agent/integrations.json`:
 		{
 			"path": "/ABSOLUTE/PATH/integration.mjs",
 			"sha256": "REPLACE_WITH_64_HEX_SHA256",
-			"trust": "application-code"
+			"trust": "application-code",
+			"root": "/ABSOLUTE/PATH",
+			"files": { "integration.mjs": "REPLACE_WITH_64_HEX_SHA256" }
 		}
 	]
 }
 ```
 
-The manifest itself and each module path reject symlinks. Checksums are verified before import. The module exports `version = 1` and `setup(IntegrationHost)`. It can register providers, tools, context backends, and instruction resources. Project JSON cannot install or import it. Review module dependencies too; the entry checksum does not attest its entire import graph. Optional `root` and `files` inventories detect added, removed, or changed local files. [Integrity limits](security.md#integration-integrity-in-v041) remain explicit. These modules have normal application privileges and are trusted code. `IntegrationHost.ui` exposes Pi's native command and event registration for optional parent UI customization. It does not register worker providers or grant worker tools.
+Use a dedicated integration directory and list every file under it with its reviewed digest, including local dependencies and lockfiles. Existing directory inventories remain valid. Entry-only legacy approvals now fail unless they explicitly select `"integrity": "entry-only-unverified-imports"` after review. That exception acknowledges that dependency changes are not checked. See [integrity and reapproval](security.md#executable-integration-integrity).
 
-The managed launcher explicitly loads this manifest through `src/extension.ts`; no core edits are required. Validation checks JSON, integration entry checksums, and dependency pins without executing integration modules. Adapter existence and registered resource identifiers are checked when the managed extension and worker initialize. Restart Pi after changing provider registrations or executable integrations.
+The module exports `version = 1` and `setup(IntegrationHost)`. It can register worker providers, tools, context backends and instruction resources. Project JSON cannot install or import it. Modules have application-process privileges; inventories do not constrain their imports or sandbox them. Prefer native Pi extensions for parent tools, commands, UI and providers. `IntegrationHost.ui` retains Pi's native command/event methods for compatibility, without adding a separate extension lifecycle.
+
+The managed launcher explicitly loads this manifest through `src/extension.ts`; no core edits are required. Validation checks JSON, integration approval scopes and inventories, entry digests and dependency pins without executing integration modules. Fixed review diagnostics identify required reapproval without printing configuration values. Adapter existence and registered resource identifiers are checked when the managed extension and worker initialize. Restart Pi after changing provider registrations or executable integrations.
 
 ## Choose context backends
 

@@ -6,7 +6,10 @@ permissions:
   contents: read
 jobs:
   offline-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PI_OFFLINE: "1"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -15,7 +18,47 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - run: npm run docs:check
       - run: npm run bootstrap
       - run: npm run recipe -- minimal
       - run: npm run bootstrap
       - run: npm run validate
+      - name: Validate a nontrivial recipe without replacing the minimal profile
+        run: |
+          node --import tsx --input-type=module -e '
+          import assert from "node:assert/strict";
+          import { loadPlatform } from "./src/platform/config.ts";
+          import { readFileSync } from "node:fs";
+          const recipe = JSON.parse(readFileSync("recipes/agent-team.json", "utf8"));
+          delete recipe.compatibility;
+          const platform = loadPlatform(".poly/agent", process.cwd(), recipe);
+          assert.equal(platform.agents.length, 4);
+          assert.equal(platform.workflows[0].steps.length, 4);
+          '
+  linux-sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PI_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.21.1
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install the system sandbox dependency
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y bubblewrap
+      - name: Probe namespace support without weakening runner security
+        id: namespaces
+        run: |
+          if bwrap --unshare-all --die-with-parent --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev /usr/bin/true; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Runner denies Bubblewrap namespaces. Sandbox tests were not run; local opt-in verification is required."
+            echo "Bubblewrap unavailable: namespace probe failed. No host-shell fallback was used. Run PI_POLY_SANDBOX_TEST=1 npm test locally." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Run actual sandbox and parent-termination fixtures
+        if: steps.namespaces.outputs.supported == 'true'
+        run: PI_POLY_SANDBOX_TEST=1 npm test

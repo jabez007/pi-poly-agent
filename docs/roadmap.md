@@ -1,12 +1,12 @@
-# Roadmap after v0.4.1
+# Roadmap after v0.4.2
 
 Pi remains the resource platform. Pi Poly Agent adds provider eligibility, bounded tasks/workflows, workspace isolation, artifacts, and attributed context. Native parent extensions, skills, prompts, themes, packages, filtering, project trust, and reloads work through the pinned Pi 1.5.2 mechanisms. Workers accept selected native instruction snapshots, with executable discovery disabled.
 
 ## Foundational work for v0.5
 
 1. Qualify representative maintained Pi packages in real interactive sessions and explicitly authorized Codex → Kimi/Z.AI workflows. Include real local endpoints separately. Record resource versions, provider/model IDs, billing classification, cancellation, and observed tool behavior. Offline fixtures do not establish live compatibility.
-2. Improve configuration diagnostics and reviewed resource provenance. Add an inspect-only report for native resources, effective worker permissions, configuration origins, and package contribution references. Evaluate immutable integration deployment with dependency lockfiles. Do not add a second package manager or claim whole-import attestation from entry hashing.
-3. Evaluate release distribution and upgrades against the pinned SDK. Broader distribution needs package compatibility evidence, clear migration/trust prompts, and CI coverage for native local packages. Keep dependency updates separate and test Pi's actual installed APIs before adopting current documentation.
+2. Improve configuration diagnostics and reviewed resource provenance. Add an inspect-only report for native resources, effective worker permissions, configuration origins, and package contribution references. Use the new directory inventories and evaluate immutable integration deployment with dependency lockfiles. Do not add a second package manager or claim whole-import attestation from entry hashing.
+3. Evaluate release distribution and upgrades against the pinned SDK. Offline native local-package and integrity fixtures now run in CI; hosted sandbox results remain dependent on namespace availability. Broader distribution still needs maintained-package compatibility evidence, observed hosted CI results for the release, and reviewed upgrade artifacts. Keep dependency updates separate and test Pi's actual installed APIs before adopting current documentation.
 
 ## Optional enhancements after qualification
 
@@ -26,3 +26,11 @@ Pi remains the resource platform. Pi Poly Agent adds provider eligibility, bound
 - MemPalace remains optional. Native context/MCP extensions can coexist without implementing `ContextBackend`. Generic backend writes remain reviewed extension operations; task events stay in local records.
 
 Avoid building a generic plugin runtime, competing extension/skill formats, an orchestration daemon, or more autonomous planning to solve these compatibility and qualification gaps.
+
+## v0.5 readiness
+
+Native package/resource fixtures, generic recipes, durable recovery and centrally restricted workers are ready for wider offline testing. Executable integrations now default to directory review; entry-only approvals require an explicit acknowledgment of unverified imports. Neither mode attests imports outside its recorded scope or sandboxes trusted application code.
+
+Wider live-use claims remain blocked on explicitly authorized Codex, Kimi, Z.AI and real compatible-endpoint qualification. Claude account authorization remains unresolved and its workers remain disabled. Google requires its existing activation review and direct interactive qualification; consumer ACP workers remain forbidden. A successful fixture or CI run cannot remove those blockers.
+
+The next priorities are maintained native package and authorized provider qualification, inspect-only resource/policy provenance diagnostics, and reproducible release/upgrade verification. Supporting-file snapshots, template arguments and provider-private worker session continuation can wait. No new scheduler or extension runtime is needed.

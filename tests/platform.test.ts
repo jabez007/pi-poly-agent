@@ -712,7 +712,14 @@ test("attested integration modules load only from the managed profile and checks
 		join(profile, "integrations.json"),
 		JSON.stringify({
 			version: 1,
-			modules: [{ path: module, trust: "application-code", sha256: "0".repeat(64) }],
+			modules: [
+				{
+					path: module,
+					trust: "application-code",
+					integrity: "entry-only-unverified-imports",
+					sha256: "0".repeat(64),
+				},
+			],
 		}),
 	);
 	await assert.rejects(loadIntegrations(profile, new ProviderRegistry(defaultPolicy)), /checksum/);
@@ -724,6 +731,7 @@ test("attested integration modules load only from the managed profile and checks
 				{
 					path: module,
 					trust: "application-code",
+					integrity: "entry-only-unverified-imports",
 					sha256: createHash("sha256").update(code).digest("hex"),
 				},
 			],

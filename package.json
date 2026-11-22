@@ -1,6 +1,6 @@
 {
 	"name": "pi-poly-agent",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"private": true,
 	"type": "module",
 	"license": "GPL-3.0-or-later",
@@ -16,6 +16,7 @@
 		"test": "node --import ./tests/isolate.mjs --import tsx --test tests/*.test.ts",
 		"typecheck": "tsc --noEmit",
 		"lint": "eslint src scripts tests",
+		"docs:check": "node --import tsx scripts/check-docs.ts",
 		"format:check": "prettier --check .",
 		"check": "npm run typecheck && npm run lint && npm run format:check && npm test",
 		"recipe": "node --import tsx scripts/cli.ts recipe"

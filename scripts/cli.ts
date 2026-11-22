@@ -1,4 +1,4 @@
-import { validateIntegrations } from "../src/platform/integrations.ts";
+import { IntegrationReviewRequired, validateIntegrations } from "../src/platform/integrations.ts";
 import { loadPlatform } from "../src/platform/config.ts";
 import { validateInstanceDefinition } from "../src/platform/providers.ts";
 import {
@@ -204,7 +204,7 @@ async function spawnPi(args: string[]): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
 	main(process.argv.slice(2)).catch((error) => {
 		console.error(
-			error instanceof ResourceTrustRequired
+			error instanceof ResourceTrustRequired || error instanceof IntegrationReviewRequired
 				? error.message
 				: "Managed operation failed. Check Node >=22.19, npm ci --ignore-scripts, profile configuration, and npm run validate. Diagnostic values were withheld.",
 		);

@@ -32,7 +32,7 @@ npm run pi -- config
 npm start
 ```
 
-The commands use the pinned Pi CLI and isolated profile. Installation is a trusted-code decision. Existing resources that were previously suppressed require `npm start -- --trust-native-resources` once. Project resources use Pi's own trust prompt. Personal credentials are never copied. [Native resource compatibility](docs/pi-ecosystem.md) covers personal references, package contributions, worker restrictions, and the compatibility matrix. See [v0.4.1 migration](docs/migration-v041.md) before activating existing resources or integrations.
+The commands use the pinned Pi CLI and isolated profile. Installation is a trusted-code decision. Existing resources that were previously suppressed require `npm start -- --trust-native-resources` once. Project resources use Pi's own trust prompt. Personal credentials are never copied. [Native resource compatibility](docs/pi-ecosystem.md) covers personal references, package contributions, worker restrictions, and the compatibility matrix. See [resource migration](docs/migration-v041.md) before activating existing resources and [integration reapproval](docs/security.md#reapprove-existing-integrations) when upgrading to v0.4.2.
 
 ## Compose agents and workflows
 
@@ -87,7 +87,7 @@ npm run qualify -- openai-codex
 
 Tests use temporary authentication stores and deterministic transports. The opt-in sandbox tests need Linux namespace support. Qualification prints a manual checklist without authentication or provider requests.
 
-**No live subscription execution has been qualified.** Mocked provider scenarios and a loopback fake OpenAI-compatible server establish local behavior only. Worker session continuation, recursive delegation, network-enabled worker tools, and arbitrary Pi extension hooks inside workers remain unsupported. Executable integrations require explicit checksum pinning; project JSON never imports code. See [migration](docs/migration-v04.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and optional [terminal integrations](docs/terminal.md).
+**No live subscription execution has been qualified.** Mocked provider scenarios and a loopback fake OpenAI-compatible server establish local behavior only. Worker session continuation, recursive delegation, network-enabled worker tools, and arbitrary Pi extension hooks inside workers remain unsupported. Executable integrations require directory inventories or explicit entry-only trust; project JSON never imports code. See [migration](docs/migration-v04.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and optional [terminal integrations](docs/terminal.md).
 
 ## License
 

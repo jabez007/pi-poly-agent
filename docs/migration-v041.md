@@ -12,7 +12,7 @@ Worker skills may select `pi:skill:NAME` and `pi:prompt:NAME`. Existing text reg
 
 ## Review executable integration trust
 
-Existing `integrations.json` entries retain their path and digest but now require `"trust": "application-code"`. Add that field only after reviewing imports and dependencies. An entry digest does not attest the import graph. Optional `root` and `files` inventories detect local package changes. See [integration integrity](security.md#integration-integrity-in-v041). The loader never edits the manifest or silently grants this trust.
+In v0.4.1, existing `integrations.json` entries retained their path and digest and required `"trust": "application-code"`. An entry digest does not attest the import graph. For v0.4.2, directory inventory or explicit entry-only reapproval is also required. See [current integration integrity and migration](security.md#executable-integration-integrity). The loader never edits the manifest or silently grants trust.
 
 ## Continue recoverable workflows
 
