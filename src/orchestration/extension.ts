@@ -699,7 +699,7 @@ async function integrateTask(
 		throw new Error("Task worktree changed after review; request a new review before integration");
 	const diff = reviewDiffView(task.workspace.path, task.workspace.base, task.revision);
 	ctx.ui.notify(
-		`${diff}\n\nReview findings:\n${reviews.map((r) => JSON.stringify(r.result)).join("\n")}`,
+		`${diff}\n\nReviewer visibility (approved packets, including files not shown or listed):\n${reviews.map((r) => `${r.id} ${r.provider}/${r.model}\n${r.context || "No additional context supplied."}`).join("\n\n")}\n\nReview findings:\n${reviews.map((r) => JSON.stringify(r.result)).join("\n")}`,
 		"info",
 	);
 	if (

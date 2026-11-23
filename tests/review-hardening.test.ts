@@ -22,6 +22,24 @@ test("case-insensitive Git metadata names are refused in task worktrees", async 
 	);
 });
 
+test("integration preview preserves the reviewer's approved visibility limits", async () => {
+	const host = await reviewedProject((task) =>
+		writeFileSync(join(task.workspace.path, "medium.txt"), "source line\n".repeat(700)),
+	);
+	try {
+		const review = host.completed.find((t) => t.reviewOf === host.builder.id)!;
+		await host.commands.get("task").handler(`${host.builder.id} integrate`, host.ctx);
+		const preview = host.notices.find((n) => n.includes("Review findings:"))!;
+		assert.ok(
+			preview.includes(review.context!),
+			"Integration preview must retain what the reviewer was approved to see, including omissions",
+		);
+		assert.match(preview, /Reviewer visibility/);
+	} finally {
+		await host.close();
+	}
+});
+
 test("all invisible Unicode code points are escaped in every review view", async () => {
 	const points = [
 		0x00ad,
