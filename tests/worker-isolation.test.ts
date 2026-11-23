@@ -21,9 +21,15 @@ for (const variant of ["at", "tilde-file", "tilde-root", "file-url", "unicode-sp
 				home = join(root, "fixture-home");
 			for (const path of [worktree, outside, home]) mkdirSync(path);
 			const oldHome = process.env.HOME;
-			process.env.HOME = home;
+			const selectedHome = variant === "tilde-root" ? join(home, "controlled-file") : home;
+			process.env.HOME = selectedHome;
 			try {
-				const target = variant.startsWith("tilde") ? join(home, "x") : join(outside, "x");
+				const target =
+					variant === "tilde-root"
+						? selectedHome
+						: variant.startsWith("tilde")
+							? join(home, "x")
+							: join(outside, "x");
 				writeFileSync(target, "outside fixture content\n");
 				symlinkSync(outside, join(worktree, "with space"));
 				const paths: Record<string, string> = {
@@ -34,7 +40,7 @@ for (const variant of ["at", "tilde-file", "tilde-root", "file-url", "unicode-sp
 					"unicode-space": "with\u00a0space/x",
 				};
 				const tool = scopedTools(worktree, true).find((t) => t.name === operation)!;
-				let rejected = false,
+				let refusal = "",
 					result: unknown;
 				try {
 					result = await tool.execute(
@@ -42,22 +48,25 @@ for (const variant of ["at", "tilde-file", "tilde-root", "file-url", "unicode-sp
 						{
 							path: paths[variant],
 							content: "changed\n",
-							oldText: "outside fixture content",
-							newText: "changed",
+							edits: [{ oldText: "outside fixture content", newText: "changed" }],
 						},
 						undefined,
 						undefined,
 						{} as any,
 					);
-				} catch {
-					rejected = true;
+				} catch (error) {
+					refusal = String(error);
 				}
 				assert.equal(readFileSync(target, "utf8"), "outside fixture content\n");
 				assert.ok(
 					!JSON.stringify(result)?.includes("outside fixture content"),
 					"Outside content must not be returned",
 				);
-				assert.equal(rejected, true, "Reinterpreted paths must be rejected");
+				assert.match(
+					refusal,
+					/Worker path shorthand or Unicode space normalization refused/,
+					"Refusal must come from the path boundary, not invalid tool input",
+				);
 				if (operation === "write" && variant !== "tilde-root") {
 					const missing = paths[variant].replace(/x$/, "new-file");
 					await assert.rejects(
@@ -79,16 +88,3 @@ for (const variant of ["at", "tilde-file", "tilde-root", "file-url", "unicode-sp
 		});
 	}
 }
-
-test("checked absolute worker paths keep legitimate spaces and ignore caller cwd", async () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-path-valid-"));
-	const tool = scopedTools(root, true).find((t) => t.name === "write")!;
-	await tool.execute(
-		"fixture",
-		{ path: "with space.txt", content: "source\n" },
-		undefined,
-		undefined,
-		{ cwd: tmpdir() } as any,
-	);
-	assert.equal(readFileSync(join(root, "with space.txt"), "utf8"), "source\n");
-});

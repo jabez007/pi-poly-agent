@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -55,4 +55,17 @@ test("real worker read preserves existing files and reports missing files", asyn
 		read.execute("fixture", { path: "missing.txt" }, undefined, undefined, {} as any),
 		/ENOENT|exist|missing/i,
 	);
+});
+
+test("checked absolute worker paths keep legitimate spaces and ignore caller cwd", async () => {
+	const root = mkdtempSync(join(tmpdir(), "poly-path-valid-"));
+	const tool = scopedTools(root, true).find((t) => t.name === "write")!;
+	await tool.execute(
+		"fixture",
+		{ path: "with space.txt", content: "source\n" },
+		undefined,
+		undefined,
+		{ cwd: tmpdir() } as any,
+	);
+	assert.equal(readFileSync(join(root, "with space.txt"), "utf8"), "source\n");
 });
