@@ -2,6 +2,26 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { validateHandoff, type Handoff } from "./memory.ts";
 import type { Task } from "./orchestration/tasks.ts";
 
+function entryForm(value: string): string {
+	return value.replace(/\r\n?|\n/g, " ").trim();
+}
+function uniqueEntries(values: string[]): string[] {
+	return [...new Set(values.map(entryForm))];
+}
+function uniqueFacts(facts: Handoff["facts"]): Handoff["facts"] {
+	return [
+		...new Map(
+			facts.map((fact) => {
+				const normalized = { ...fact, text: entryForm(fact.text), source: entryForm(fact.source) };
+				return [
+					JSON.stringify([normalized.text, normalized.source, normalized.verified]),
+					normalized,
+				];
+			}),
+		).values(),
+	];
+}
+
 export function draftHandoff(
 	entries: SessionEntry[],
 	provenance: Handoff["provenance"],
@@ -16,9 +36,10 @@ export function draftHandoff(
 		.filter((e) => e.type === "custom" && e.customType === "poly-task-complete")
 		.map((e) => (e as any).data as Task)
 		.filter((t) => t.status === "completed" && t.result);
-	const files = [
-		...new Set([...(previous ? previous.files : []), ...tasks.flatMap((t) => t.result!.files)]),
-	];
+	const files = uniqueEntries([
+		...(previous ? previous.files : []),
+		...tasks.flatMap((t) => t.result!.files),
+	]);
 	const recent = entries
 		.filter((e) => e.type === "message" && e.message.role === "assistant")
 		.slice(-2)
@@ -34,20 +55,14 @@ export function draftHandoff(
 	return validateHandoff({
 		version: 1,
 		objective,
-		completed: [...new Set(tasks.map((t) => `${t.id}: ${t.result!.summary}`))],
-		decisions: [...new Set(previous?.decisions || [])],
-		questions: [
-			...new Set([...(previous?.questions || []), ...tasks.flatMap((t) => t.result!.questions)]),
-		],
+		completed: uniqueEntries(tasks.map((t) => `${t.id}: ${t.result!.summary}`)),
+		decisions: uniqueEntries(previous?.decisions || []),
+		questions: uniqueEntries([
+			...(previous?.questions || []),
+			...tasks.flatMap((t) => t.result!.questions),
+		]),
 		files,
-		facts: [
-			...new Map(
-				[...(previous?.facts || []), ...findings].map((fact) => [
-					JSON.stringify([fact.text, fact.source, fact.verified]),
-					fact,
-				]),
-			).values(),
-		],
+		facts: uniqueFacts([...(previous?.facts || []), ...findings]),
 		hypotheses: [
 			...recent.map((text) => `Agent summary, unverified: ${text.slice(0, 1500)}`),
 			...(memory
@@ -78,8 +93,7 @@ const SECTIONS = [
 	"Hypotheses",
 ];
 export function handoffMarkdown(h: Handoff): string {
-	const list = (values: string[]) =>
-		values.map((value) => `- ${value.replace(/\n/g, " ")}`).join("\n");
+	const list = (values: string[]) => values.map((value) => `- ${entryForm(value)}`).join("\n");
 	const facts = (verified: boolean) =>
 		list(h.facts.filter((f) => f.verified === verified).map((f) => `${f.text} | ${f.source}`));
 	const bodies = [

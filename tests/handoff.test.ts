@@ -75,6 +75,46 @@ test("three unedited handoff commands preserve one copy of branch facts and ques
 	]);
 });
 
+test("multiline handoff facts questions and completed entries stay stable across unedited runs", async () => {
+	const host = await handoffHost(0);
+	host.session.appendCustomEntry("poly-task-complete", {
+		id: "multiline-fixture",
+		status: "completed",
+		provider: "openai-codex",
+		model: "fixture",
+		result: {
+			summary: "Summary line one\nline two",
+			files: ["app.txt"],
+			questions: ["Question line one\nline two"],
+			findings: [
+				{
+					text: "Finding line one\nline two",
+					source: "app.txt:1\nfixture evidence",
+					severity: "info",
+				},
+			],
+		},
+	});
+	const counts: number[][] = [];
+	for (let n = 0; n < 3; n++) {
+		await host.handoff();
+		const entry = host.session
+			.getBranch()
+			.filter((e) => e.type === "custom" && e.customType === "poly-handoff")
+			.at(-1) as any;
+		counts.push([
+			entry.data.facts.length,
+			entry.data.questions.length,
+			entry.data.completed.length,
+		]);
+	}
+	assert.deepEqual(counts, [
+		[1, 1, 1],
+		[1, 1, 1],
+		[1, 1, 1],
+	]);
+});
+
 test("an oversized handoff draft reports a user-facing limit instead of throwing", async () => {
 	const host = await handoffHost(30, "Long fixture summary ".repeat(70));
 	await assert.doesNotReject(host.handoff);
