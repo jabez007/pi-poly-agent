@@ -45,14 +45,14 @@ test("attributes cannot hide text changes from artifacts, reviewer tools or inte
 	}
 });
 
-test("binary review output names the changed file and omits raw control bytes", async () => {
+test("binary review output names the changed file and escapes control bytes without dropping lines", async () => {
 	const host = await reviewedProject((task) =>
 		writeFileSync(join(task.workspace.path, "asset.bin"), Buffer.from([0, 1, 2, 3, 27])),
 	);
 	try {
 		const diff = workspaceDiff(host.builder.workspace).diff;
 		assert.match(diff, /asset\.bin/);
-		assert.match(diff, /Binary.*changed/);
+		assert.ok(diff.includes("\\u0000") && diff.includes("\\u001b"));
 		assert.ok(!diff.includes("\u0000") && !diff.includes("\u001b"));
 	} finally {
 		await host.close();

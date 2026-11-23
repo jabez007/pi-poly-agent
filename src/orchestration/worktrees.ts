@@ -1,3 +1,4 @@
+import { assertNoSecrets } from "../secrets.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -156,18 +157,18 @@ export function controlFileNotice(files: string[]): string {
 	return controls.length ? `Repository control files changed: ${controls.join(", ")}\n` : "";
 }
 
-/** Render forced text diffs without sending terminal control bytes or unbounded output. */
+/** Escape unsafe characters without dropping any source line. */
+export function escapeDiffText(text: string): string {
+	return text.replace(/[\\\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, (character) =>
+		character === "\n" ? "\n" : `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+}
 export function renderReviewDiff(diff: string): string {
-	const rendered = diff
-		.split(/(?=^diff --git )/m)
-		.map((part) => {
-			if (!/\p{Cc}/u.test(part.replace(/[\t\n\r]/g, ""))) return part;
-			return `${part.split("\n")[0]}\nBinary or control-byte content changed; raw bytes omitted. Inspect this file separately.\n`;
-		})
-		.join("");
-	if (rendered.length > 48000)
-		throw new Error("Diff exceeds 48000 characters; inspect smaller files manually before review");
-	return rendered;
+	assertNoSecrets(diff);
+	return (
+		"Review diff: controls, bidirectional characters and backslashes use visible Unicode escapes.\n" +
+		escapeDiffText(diff)
+	);
 }
 export function snapshotWorkspace(workspace: Workspace): string {
 	pinWorkspace(workspace);

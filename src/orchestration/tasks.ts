@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assertEnvironment, type Policy } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
+import { reviewDiffView } from "./review-view.ts";
 import { assertSafeProfile } from "../profile.ts";
 import type { Role } from "./roles.ts";
 import {
@@ -372,7 +373,7 @@ export class TaskManager {
 					task = {
 						...input,
 						requestBudget: intersectRequestBudget(input.requestBudget, replacement?.requestBudget),
-						context: controlFileNotice(review?.result?.files || []) + (input.context || ""),
+						context: reviewContext(input, review),
 						id,
 						depth: 1,
 						status: "created",
@@ -601,6 +602,26 @@ export class TaskManager {
 		this.persist(task, false);
 		return this.get(id);
 	}
+}
+
+function reviewContext(input: Dispatch, review?: Task): string {
+	const context = input.context || "";
+	if (!review?.revision) return context;
+	const limit = input.policy?.contextBudget ?? 16000;
+	const view =
+		controlFileNotice(review.result?.files || []) +
+		reviewDiffView(
+			review.workspace.path,
+			review.workspace.base,
+			review.revision,
+			[],
+			Math.min(limit, 6000),
+		);
+	if (view.length > limit)
+		throw new Error(
+			"Review file manifest exceeds context budget; increase it or inspect a smaller task",
+		);
+	return view + "\n\n" + context.slice(0, Math.max(0, limit - view.length - 2));
 }
 
 function assertAgentModel(input: Dispatch, capabilities: Capabilities): void {

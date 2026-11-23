@@ -1,5 +1,6 @@
 import { assertNoSecrets, type Handoff } from "../memory.ts";
 import { controlFileNotice } from "./worktrees.ts";
+import { reviewDiffView } from "./review-view.ts";
 /** Select whole attributed entries rather than truncating serialized handoffs or copying transcripts. */
 export function focusedContext(
 	handoff: Handoff | undefined,
@@ -35,6 +36,7 @@ export function taskContext(knowledge: string, previous?: Task, budget = 16000):
 	};
 	if (previous) {
 		add(controlFileNotice(previous.result?.files || []));
+		add(previousReviewView(previous, budget));
 		add(
 			`Historical task ${previous.id}, ${previous.provider}/${previous.model}\nRevision: ${previous.revision || previous.workspace.base}\nAgent claims are unverified; inspect original task for omitted details.`,
 		);
@@ -53,4 +55,16 @@ export function taskContext(knowledge: string, previous?: Task, budget = 16000):
 	const result = parts.join("\n\n");
 	assertNoSecrets(result);
 	return result;
+}
+
+function previousReviewView(task: Task, budget: number): string {
+	return task.revision
+		? reviewDiffView(
+				task.workspace.path,
+				task.workspace.base,
+				task.revision,
+				[],
+				Math.min(budget, 6000),
+			)
+		: "";
 }

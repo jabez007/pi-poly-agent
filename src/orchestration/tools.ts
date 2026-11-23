@@ -1,4 +1,5 @@
-import { git, renderReviewDiff } from "./worktrees.ts";
+import { git } from "./worktrees.ts";
+import { reviewDiffView } from "./review-view.ts";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -198,18 +199,7 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 		execute: async (_id, args: any) => {
 			scopedPath(cwd, args.path);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
-			const diff = git(cwd, [
-				"diff",
-				"--text",
-				"--no-color",
-				"--no-ext-diff",
-				"--no-textconv",
-				base,
-				"HEAD",
-				"--",
-				args.path,
-			]);
-			const rendered = renderReviewDiff(diff);
+			const rendered = reviewDiffView(cwd, base, git(cwd, ["rev-parse", "HEAD"]), [args.path]);
 			assertNoSecrets(rendered);
 			return { content: [{ type: "text", text: rendered }], details: { base } };
 		},

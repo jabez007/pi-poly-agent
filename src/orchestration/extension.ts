@@ -19,6 +19,7 @@ import type { TaskRunner } from "./tasks.ts";
 import { approvedTest, type ApproveTest } from "./tools.ts";
 import { createPiRunner } from "./runner.ts";
 import { cleanupWorkspace, workspaceDiff, git } from "./worktrees.ts";
+import { reviewDiffView } from "./review-view.ts";
 
 export function registerOrchestration(
 	pi: ExtensionAPI,
@@ -698,7 +699,7 @@ async function integrateTask(
 		git(task.workspace.path, ["rev-parse", "HEAD"]) !== task.revision
 	)
 		throw new Error("Task worktree changed after review; request a new review before integration");
-	const diff = workspaceDiff(task.workspace).diff;
+	const diff = reviewDiffView(task.workspace.path, task.workspace.base, task.revision);
 	ctx.ui.notify(
 		`${diff}\n\nReview findings:\n${reviews.map((r) => JSON.stringify(r.result)).join("\n")}`,
 		"info",
