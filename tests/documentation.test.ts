@@ -77,3 +77,23 @@ test("qualification review procedure names the generic workflow and its required
 	const config = loadPlatform(root, root);
 	assert.ok(config.workflows.some((w) => w.id === "implementation-review"));
 });
+
+test("operational documentation describes exact reads nested repositories bounded views and retained cleanup history", () => {
+	for (const file of ["docs/security.md", "docs/architecture.md", "docs/workflows.md"]) {
+		const text = readFileSync(file, "utf8");
+		assert.match(
+			text,
+			/existing regular file/,
+			`${file} must describe the exact-read precondition`,
+		);
+		assert.match(text, /nested repositor/i);
+		assert.match(text, /omitted files|files omitted/i);
+		assert.doesNotMatch(
+			text,
+			/refuse patches above 48000|patches over 48000 rendered characters are refused/,
+		);
+	}
+	for (const file of ["README.md", "docs/workflows.md"]) {
+		assert.match(readFileSync(file, "utf8"), /cleanup[^\n]*history|history[^\n]*cleanup/i);
+	}
+});
