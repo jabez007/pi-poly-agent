@@ -18,7 +18,13 @@ import { TaskManager, type Dispatch, type Task } from "./tasks.ts";
 import type { TaskRunner } from "./tasks.ts";
 import { approvedTest, type ApproveTest } from "./tools.ts";
 import { createPiRunner } from "./runner.ts";
-import { cleanupWorkspace, workspaceDiff, git } from "./worktrees.ts";
+import {
+	cleanupWorkspace,
+	workspaceDiff,
+	git,
+	holdWorkspacePreparation,
+	assertWorkspaceIdle,
+} from "./worktrees.ts";
 import { reviewDiffView } from "./review-view.ts";
 
 export function registerOrchestration(
@@ -161,6 +167,7 @@ export function registerOrchestration(
 		assertPreparation(task, command, config().policy);
 		if (command) {
 			const controller = new AbortController();
+			const release = holdWorkspacePreparation(task.workspace.path);
 			preparations.set(task.id, controller);
 			try {
 				const details = await approvedTest(
@@ -179,6 +186,7 @@ export function registerOrchestration(
 				ctx.ui.notify(`Preparation exit ${details.exitCode}\n${details.output}`, "info");
 			} finally {
 				preparations.delete(task.id);
+				release();
 			}
 			return;
 		}
@@ -197,21 +205,25 @@ export function registerOrchestration(
 			importNodeDependencies(task.workspace);
 	}
 	function assertTaskIdle(task: Task): void {
-		if (task.status === "running")
-			throw new Error("Cancel the running task before inspecting diffs or cleanup");
-		if (preparations.has(task.id))
-			throw new Error(
-				"Task preparation is active; wait for preparation before inspecting diffs or cleanup",
-			);
+		assertWorkspaceIdle(task.workspace.path);
+		if (manager!.get(task.id).status === "running")
+			throw new Error("Cancel the running task before this action");
 	}
 	function inspectTaskDiff(task: Task): string {
 		assertTaskIdle(task);
 		return workspaceDiff(task.workspace).diff || "No source diff.";
 	}
 	async function recoverTask(ctx: ExtensionContext, task: Task): Promise<void> {
+		assertTaskIdle(task);
 		ctx.ui.notify(formatTask(task), "info");
 		const choice = await modelChoice(ctx, task.role);
 		if (choice) await launch(ctx, task.role, task.brief, choice, task.reviewOf, task.id);
+	}
+	function idleReference(id?: string): Task | undefined {
+		if (!id) return;
+		const task = manager!.get(id);
+		assertTaskIdle(task);
+		return task;
 	}
 	async function taskActions(ctx: ExtensionContext, task: Task): Promise<void> {
 		ctx.ui.notify(formatTask(task), "info");
@@ -225,7 +237,8 @@ export function registerOrchestration(
 		if (choice === "Inspect diff") ctx.ui.notify(inspectTaskDiff(task), "info");
 		if (choice === "Recover with a new worker") await recoverTask(ctx, task);
 		if (choice === "Cancel worker") await manager!.cancel(task.id);
-		if (choice === "Inspect review and integrate") await integrateTask(ctx, task, manager!);
+		if (choice === "Inspect review and integrate")
+			await integrateTask(ctx, task, manager!, () => assertTaskIdle(task));
 		if (choice === "Review implementation") {
 			const role = inspectionAgent();
 			const model = await modelChoice(ctx, role, task.workflowReviewModel);
@@ -280,13 +293,10 @@ export function registerOrchestration(
 		registry.assert(provider, 1);
 		const list = tasks(ctx);
 		const reference = reviewOf || replacementOf;
-		const previous = reference ? list.get(reference) : undefined;
+		const knowledge = await contextPacket(brief, role.context);
+		const previous = idleReference(reference);
 		const execution = effectivePolicy(agentPolicy(role), config().policy);
-		const context = taskContext(
-			await contextPacket(brief, role.context),
-			previous,
-			execution.contextBudget,
-		);
+		const context = taskContext(knowledge, previous, execution.contextBudget);
 		assertNoSecrets({ brief, context });
 		const draft = await ctx.ui.editor(
 			"Review focused task context. No parent transcript is inherited.",
@@ -317,6 +327,7 @@ export function registerOrchestration(
 			requestBudget,
 		};
 		if (epoch !== generation || stopped) throw new Error("Session changed; task launch canceled");
+		idleReference(reference);
 		const task = list.dispatch(input);
 		ctx.ui.notify(`Started ${task.id} (${role.name}, ${model}). Use /tasks or /task.`, "info");
 		return task;
@@ -588,7 +599,7 @@ export function registerOrchestration(
 				return;
 			}
 			if (action === "integrate") {
-				await integrateTask(ctx, task, list);
+				await integrateTask(ctx, task, list, () => assertTaskIdle(task));
 				return;
 			}
 			if (action === "recover") {
@@ -691,7 +702,9 @@ async function integrateTask(
 	ctx: ExtensionContext,
 	task: Task,
 	manager: TaskManager,
+	assertIdle: () => void,
 ): Promise<void> {
+	assertIdle();
 	if (task.status !== "completed" || !task.role.editing || !task.revision)
 		throw new Error("Only completed editing task snapshots can be integrated");
 	const reviews = manager
@@ -721,8 +734,10 @@ async function integrateTask(
 			"Integrate the reviewed task snapshot?",
 			"Cherry-pick into the clean, unchanged parent branch. Review all findings and the diff first.",
 		))
-	)
+	) {
+		assertIdle();
 		manager.integrate(task.id);
+	}
 }
 
 async function selectRun(

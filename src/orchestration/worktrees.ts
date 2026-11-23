@@ -24,6 +24,22 @@ const pinnedWorkspaces = new Map<string, Workspace>();
 const taskDirectories = new Set<string>();
 const metadataBufferLimit = 2 * 1024 * 1024;
 const checkedReads = new Map<string, ReturnType<typeof freshGitInvocation>>();
+const preparingWorkspaces = new Set<string>();
+
+/** Internal lifetime of an explicitly approved preparation command, including approval waits. */
+export function holdWorkspacePreparation(path: string): () => void {
+	assertWorkspaceIdle(path);
+	const root = resolve(path);
+	preparingWorkspaces.add(root);
+	return () => {
+		preparingWorkspaces.delete(root);
+	};
+}
+
+export function assertWorkspaceIdle(path: string): void {
+	if ([...preparingWorkspaces].some((root) => containsPath(root, path)))
+		throw new Error("Task preparation is active; wait for it to finish before this action");
+}
 
 function readonlyQuery(args: string[]): boolean {
 	const command = args[0] === "--literal-pathspecs" ? 1 : 0;
@@ -56,7 +72,7 @@ function synchronousRead<T>(operation: () => T): T {
 export function withCheckedGitRead<T>(cwd: string, operation: () => T): T {
 	const key = resolve(cwd);
 	if (checkedReads.has(key)) return synchronousRead(operation);
-	checkedReads.set(key, freshGitInvocation(cwd, []));
+	checkedReads.set(key, gitInvocation(cwd, []));
 	try {
 		return synchronousRead(operation);
 	} finally {
@@ -74,11 +90,12 @@ function containsPath(root: string, target: string): boolean {
 }
 
 function gitInvocation(cwd: string, args: string[]) {
+	assertWorkspaceIdle(cwd);
 	const key = resolve(cwd),
 		checked = checkedReads.get(key);
 	if (checked && readonlyQuery(args)) {
-		// Worker tools are sequential and these scopes are synchronous and query-only. The UI also
-		// excludes active preparation writers. No owned writer can change this worktree mid-view.
+		// Worker tools are sequential and these scopes are synchronous and query-only. Every Git
+		// entry rejects active preparation, including workflow reads. No owned writer overlaps a view.
 		// This is not protection against unrelated host processes. Other Git commands invalidate it.
 		return { ...checked, args: [...checked.args, ...submoduleSafeArgs(args, true)] };
 	}
