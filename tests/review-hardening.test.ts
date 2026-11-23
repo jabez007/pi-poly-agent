@@ -1,10 +1,54 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createWorkspace, workspaceDiff } from "../src/orchestration/worktrees.ts";
+import { createWorkspace, workspaceDiff, git } from "../src/orchestration/worktrees.ts";
 import { scopedTools, diffTool } from "../src/orchestration/tools.ts";
 import { temporaryRepository, reviewedProject } from "./fixtures/review-project.ts";
+import { TaskManager } from "../src/orchestration/tasks.ts";
+import { defaultRoles } from "../src/orchestration/roles.ts";
+import { defaultPolicy } from "../src/policy.ts";
+
+test("renamed control files remain named in the canonical changed-file list", async () => {
+	const { root, directory } = temporaryRepository();
+	mkdirSync(join(root, "é"));
+	writeFileSync(join(root, "é/.gitattributes"), "# fixture\n");
+	git(root, ["add", "."]);
+	git(root, ["commit", "-m", "Fixture control file"]);
+	const manager = new TaskManager(
+		join(directory, "tasks"),
+		root,
+		defaultPolicy,
+		async ({ task }) => {
+			renameSync(
+				join(task.workspace.path, "é/.gitattributes"),
+				join(task.workspace.path, "é/attributes.txt"),
+			);
+			return { summary: "Done", files: [], tests: [], findings: [], questions: [] };
+		},
+	);
+	try {
+		const task = await manager.wait(
+			manager.dispatch({
+				parent: "fixture",
+				role: defaultRoles().find((r) => r.name === "builder")!,
+				provider: "openai-codex",
+				model: "fixture",
+				brief: "Rename fixture",
+			}).id,
+		);
+		assert.deepEqual(
+			task.result!.files,
+			["é/.gitattributes", "é/attributes.txt"],
+			"Renames must retain both paths so control-file changes cannot disappear",
+		);
+		const changes = workspaceDiff(task.workspace);
+		assert.deepEqual(changes.files, task.result!.files);
+		assert.match(changes.diff.split("\n")[0], /é\/\.gitattributes/);
+	} finally {
+		await manager.close();
+	}
+});
 
 test("case-insensitive Git metadata names are refused in task worktrees", async () => {
 	const { root, directory } = temporaryRepository();

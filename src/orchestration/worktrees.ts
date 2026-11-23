@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafeProfile } from "../profile.ts";
-import { reviewDiffView } from "./review-view.ts";
+import { reviewDiffView, reviewFileIndex } from "./review-view.ts";
 import { gitMetadataName } from "./path-policy.ts";
 
 const pinnedWorkspaces = new Map<string, Workspace>();
@@ -219,9 +219,9 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 	pinWorkspace(workspace);
 	// Include untracked source in the review snapshot, without committing or staging it in the user's tree.
 	git(workspace.path, ["add", "-N", "--", "."]);
-	const files = git(workspace.path, ["diff", "--name-only", "-z", workspace.base])
-		.split("\0")
-		.filter(Boolean);
+	const files = reviewFileIndex(workspace.path, [...reviewDiffOptions, workspace.base]).map(
+		(record) => record.file,
+	);
 	const revision = workspaceChanged(workspace.path)
 		? ""
 		: git(workspace.path, ["rev-parse", "HEAD"]);
