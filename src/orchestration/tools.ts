@@ -194,12 +194,35 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 		name: "review_diff",
 		label: "Review source diff",
 		description:
-			"Read the implementation diff against the inspected task's original base. Does not modify files.",
-		parameters: Type.Object({ path: Type.String() }),
+			'Read the implementation diff against its original base. Use path "." and an optional offset to page the changed-file index. Literal source paths show patches. Does not modify files.',
+		parameters: Type.Object({
+			path: Type.String(),
+			offset: Type.Optional(Type.Integer({ minimum: 0 })),
+		}),
 		execute: async (_id, args: any) => {
-			const path = scopedPath(cwd, args.path);
+			const indexOnly = args.path === ".";
+			const path = indexOnly ? undefined : scopedPath(cwd, args.path);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
-			const rendered = reviewDiffView(cwd, base, git(cwd, ["rev-parse", "HEAD"]), [path]);
+			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
+				throw new Error("Invalid review file offset");
+			const accept = indexOnly
+				? (file: string) => {
+						try {
+							scopedPath(cwd, file);
+							return true;
+						} catch {
+							return false;
+						}
+					}
+				: undefined;
+			const rendered = reviewDiffView(
+				cwd,
+				base,
+				git(cwd, ["rev-parse", "HEAD"]),
+				path ? [path] : [],
+				48000,
+				{ offset: args.offset, indexOnly, accept },
+			);
 			assertNoSecrets(rendered);
 			return { content: [{ type: "text", text: rendered }], details: { base } };
 		},

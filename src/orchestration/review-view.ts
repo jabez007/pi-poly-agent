@@ -87,41 +87,96 @@ function lineCounts(record: FileStat): string {
 		: `+${record.added} -${record.removed}`;
 }
 
-/** Only a budgeted patch view is retained; full source stays in Git and is screened incrementally. */
+interface ViewSelection {
+	offset?: number;
+	indexOnly?: boolean;
+	accept?: (file: string) => boolean;
+}
+function controlNotice(records: FileStat[]): string {
+	const controls = records.filter((r) => /(^|\/)\.(gitattributes|gitmodules)$/.test(r.file));
+	const shown: string[] = [];
+	for (const { file } of controls) {
+		if (controlFileNotice([...shown, file]).length > 512) break;
+		shown.push(file);
+	}
+	return (
+		controlFileNotice(shown) +
+		(controls.length > shown.length
+			? `${controls.length - shown.length} additional control files; use the full file index command.\n`
+			: "")
+	);
+}
+function filePage(records: FileStat[], offset: number, budget: number): FileStat[] {
+	const page: FileStat[] = [];
+	let used = 0;
+	for (const record of records.slice(offset)) {
+		const cost = statLine(record, false).length + 1;
+		if (used + cost > budget) break;
+		page.push(record);
+		used += cost;
+	}
+	return page;
+}
+function statLine(record: FileStat, shown: boolean): string {
+	return `[${shown ? "patch shown" : "not shown  "}] ${escapeDiffText(JSON.stringify(record.file))} ${lineCounts(record)}`;
+}
+function pageContent(
+	cwd: string,
+	base: string,
+	revision: string,
+	page: FileStat[],
+	budget: number,
+	indexOnly: boolean,
+): string {
+	const patches: string[] = [],
+		index: string[] = [];
+	let remaining = budget - page.map((r) => statLine(r, false)).join("\n").length - 1;
+	for (const record of page) {
+		const patch =
+			!indexOnly && remaining > 0
+				? filePatch(cwd, base, revision, record.file, remaining)
+				: undefined;
+		index.push(statLine(record, patch !== undefined));
+		if (patch !== undefined) {
+			patches.push(patch);
+			remaining -= patch.length;
+		}
+	}
+	return index.join("\n") + "\n" + patches.join("");
+}
+
+/** Both the file index and patches are bounded; the existing review tool can page the index. */
 export function reviewDiffView(
 	cwd: string,
 	base: string,
 	revision: string,
 	paths: string[] = [],
 	budget = 48000,
+	selection: ViewSelection = {},
 ): string {
 	if (!/^[a-f0-9]{40,64}$/.test(base) || (revision && !/^[a-f0-9]{40,64}$/.test(revision)))
 		throw new Error("Invalid review revision");
 	const options = [...reviewDiffOptions, base, ...(revision ? [revision] : []), "--", ...paths];
 	scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
-	const records = reviewFileIndex(cwd, options);
+	const records = reviewFileIndex(cwd, options).filter(
+		(r) => !selection.accept || selection.accept(r.file),
+	);
 	const commands = inspectionCommands(cwd, base, revision);
-	const header = `${controlFileNotice(records.map((r) => r.file))}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\n`;
-	const footer = `\nInspect the full committed diff:\n${commands.patch}`;
-	const stats = records.map(
-		(r) => `${escapeDiffText(JSON.stringify(r.file))} ${lineCounts(r)}`,
-	);
-	const omissionHeader =
-		"\nFiles omitted from the displayed patch (not fully reviewed by this view):\n";
-	let remaining = Math.max(
-		0,
-		budget - header.length - footer.length - omissionHeader.length - stats.join("\n").length - 2,
-	);
-	const shown: string[] = [],
-		omitted: string[] = [];
-	for (const [index, record] of records.entries()) {
-		const patch = remaining ? filePatch(cwd, base, revision, record.file, remaining) : undefined;
-		if (patch !== undefined) {
-			shown.push(patch);
-			remaining -= patch.length;
-		} else omitted.push(stats[index]);
-	}
+	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Entries marked not shown have no patch in this view.\n`;
+	const footer = `\nList every changed file:\n${commands.index}\nInspect the full committed diff:\n${commands.patch}`;
+	const available = budget - header.length - footer.length - 256;
+	if (available < 0)
+		throw new Error(
+			`Review view needs ${budget - available} characters of metadata; budget is ${budget}. Increase the context budget or inspect the task manually.`,
+		);
+	const offset = selection.offset ?? 0;
+	const page = filePage(records, offset, Math.floor(available / 2));
+	const next = offset + page.length;
+	const pagination = `\nFiles not listed in this view: ${records.length - page.length} of ${records.length}.\n${next < records.length ? `Next file offset: ${next}\n` : ""}Use review_diff with path "." and offset to page the approved file index.\n`;
 	return (
-		header + shown.join("") + (omitted.length ? omissionHeader + omitted.join("\n") : "") + footer
+		header +
+		pageContent(cwd, base, revision, page, available, !!selection.indexOnly) +
+		pagination +
+		footer
 	);
 }
