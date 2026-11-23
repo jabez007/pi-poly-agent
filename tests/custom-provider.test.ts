@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer, type RequestListener } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { bootstrap } from "../src/profile.ts";
+import { git } from "../src/orchestration/worktrees.ts";
+import { TaskManager } from "../src/orchestration/tasks.ts";
+import { createPiRunner } from "../src/orchestration/runner.ts";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import { ProviderRegistry } from "../src/platform/providers.ts";
 import { defaultPolicy } from "../src/policy.ts";
@@ -264,3 +271,90 @@ test("custom live qualification is an offline checklist with explicit local or A
 	assert.match(plan.scenarios[0].procedure, /No subscription credential/);
 	assert.throws(() => qualificationPlan("antigravity-acp"), /remain blocked/);
 });
+
+for (const [name, delta] of [
+	[
+		"incomplete tool arguments",
+		{
+			tool_calls: [
+				{
+					index: 0,
+					id: "invalid",
+					type: "function",
+					function: { name: "read", arguments: '{"path":' },
+				},
+			],
+		},
+	],
+	[
+		"unsupported tool",
+		{
+			tool_calls: [
+				{
+					index: 0,
+					id: "unknown",
+					type: "function",
+					function: { name: "unregistered_tool", arguments: "{}" },
+				},
+			],
+		},
+	],
+	["empty result", { role: "assistant", content: "" }],
+] as const) {
+	test(
+		`real compatible worker rejects ${name} without fallback or automatic replay`,
+		{ timeout: 15000 },
+		async () => {
+			let requests = 0;
+			const local = await endpoint((request, response) => {
+				requests++;
+				request.resume();
+				response.writeHead(200, { "content-type": "text/event-stream" });
+				response.write(`data: ${JSON.stringify(chunk(delta))}\n\n`);
+				response.write(`data: ${JSON.stringify(chunk({}, "stop"))}\n\n`);
+				response.end("data: [DONE]\n\n");
+			});
+			const root = mkdtempSync(join(tmpdir(), "poly-compatible-worker-"));
+			const profile = join(root, ".poly/agent");
+			bootstrap(profile);
+			git(root, ["init", "-b", "main"]);
+			git(root, ["config", "user.name", "Fixture"]);
+			git(root, ["config", "user.email", "fixture@example.invalid"]);
+			writeFileSync(join(root, ".gitignore"), ".poly/\n");
+			git(root, ["add", "."]);
+			git(root, ["commit", "-m", "base"]);
+			const registry = registration(local.url);
+			const manager = new TaskManager(
+				join(profile, "tasks"),
+				root,
+				defaultPolicy,
+				createPiRunner(profile, async () => false, undefined, registry),
+				2,
+				5000,
+				undefined,
+				undefined,
+				registry,
+			);
+			try {
+				const task = manager.dispatch({
+					parent: "offline-qualification",
+					role: {
+						name: "local-observer",
+						editing: false,
+						instructions: "Return required JSON",
+						policy: { permissions: ["read"], tools: ["read"] },
+					},
+					provider: "local-one",
+					model: "fixture",
+					brief: "Inspect fixture",
+					requestBudget: { requests: 1, outputTokens: 256 },
+				});
+				assert.equal((await manager.wait(task.id)).status, "failed");
+				assert.equal(requests, 1);
+			} finally {
+				await manager.close();
+				await local.close();
+			}
+		},
+	);
+}

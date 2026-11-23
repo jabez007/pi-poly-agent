@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import ts from "typescript-eslint";
 
 export default ts.config(
-	{ ignores: ["node_modules/**", ".poly/**"] },
+	{ ignores: ["node_modules/**", ".poly/**", "tests/fixtures/vendor/**"] },
 	js.configs.recommended,
 	...ts.configs.recommended,
 	{

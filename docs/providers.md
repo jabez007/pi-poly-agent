@@ -86,6 +86,8 @@ No provider/model fallback is selected when child initialization, authentication
 
 ## Qualification and recovery
 
+`/poly-qualify PROVIDER/MODEL` offers a separately approved, tool-free worker probe for an eligible instance. It shows the exact identity, authentication and billing mode. The probe has one generation, a requested 512-token output cap and a 30-second timeout. No tools, edits, automatic retry or provider substitution are allowed. Provider enforcement of output limits is not a monetary guarantee. This verifies only the observed request, not all provider capabilities. It is never run by installation, doctor or CI.
+
 `npm run qualify -- PROVIDER` prints a manual plan for `openai-codex`, `kimi-coding`, or `zai`. It performs no credential resolution, login, model request, or live test. Follow [qualification procedures](qualification.md) only after reviewing and choosing the operations yourself.
 
 Native worker failures have fixed, secret-screened categories and explicit recovery guidance. Provider/model identity never changes automatically. Quota, authentication, context, or uncertain transport failures do not trigger retries. `/task ID recover` is an approved new worker with a fresh transcript and preserved source changes. Existing provider-private execution state is not restored. Claude worker delegation remains blocked; Google consumer ACP remains direct-interaction-only.
@@ -95,6 +97,12 @@ Native worker failures have fixed, secret-screened categories and explicit recov
 Provider instances advertise direct interaction, delegation, concurrency, streaming, cancellation, tools, editing/read-only execution, persistence, handoffs, and billing classification. Native subscription restrictions cannot be overridden by instance declarations. Custom adapters cannot register OAuth or replace reserved providers. Exact endpoint and environment checks run again at the request boundary.
 
 The native Codex/Kimi/Z.AI scenarios remain mock-tested only. A fake loopback OpenAI-compatible server also exercises Pi's real transport, local instance registration, and independent worker execution without credentials. This does not qualify a hosted model, inference gateway, subscription, or billing agreement. Continue using the [opt-in qualification procedure](qualification.md) before relying on live accounts.
+
+## Local open-weight example
+
+[examples/local-open-weight/platform.json](../examples/local-open-weight/platform.json) is a disabled, host-independent starting point. Use a separate profile. Replace `REPLACE_MODEL_ID`, the loopback endpoint and declared limits with values from your server. Enable the instance only after review. No subscription credential or particular model host is required.
+
+Start conservatively with no tools or editing, as in the example. Use `/model` for direct interaction or delegate `local-reader` with explicitly supplied context. There is no automatic `/models` discovery. If the server actually supports streaming, cancellation and schema-compatible tool calls, qualify those operations before enabling tools and adding scoped `read` to the agent. A declaration does not prove model reliability. Remote API instances require HTTPS, separate billing activation and their own supported Pi credential path; they cannot reuse consumer subscription tokens.
 
 ## Native custom providers and qualification
 

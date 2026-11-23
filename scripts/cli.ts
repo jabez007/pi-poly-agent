@@ -8,6 +8,7 @@ import {
 	validateProjectSafetySettings,
 } from "../src/profile.ts";
 import { qualificationPlan } from "../src/orchestration/qualification.ts";
+import { doctor } from "../src/doctor.ts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -122,26 +123,37 @@ function reportValidation(
 	);
 	if (names.length) process.exitCode = 1;
 }
-export async function main(args: string[]): Promise<void> {
+export function commandOptions(input: string[]) {
+	const args = [...input];
+	const options = { profile: PROFILE, project: process.cwd() };
+	for (const name of ["profile", "project"] as const) {
+		const flag = `--${name}`;
+		const at = args.indexOf(flag);
+		if (at < 0) continue;
+		if (!args[at + 1] || args[at + 1].startsWith("--") || args.lastIndexOf(flag) !== at)
+			throw new Error("Supply one explicit profile/project path");
+		options[name] = resolve(args[at + 1]);
+		assertSafeProfile(options[name]);
+		args.splice(at, 2);
+	}
+	return { ...options, args };
+}
+
+export async function main(input: string[]): Promise<void> {
+	const { args, profile, project } = commandOptions(input);
+	const command = args[0] || "validate";
+	if (command === "doctor") {
+		const report = await doctor(profile, project);
+		console.log(JSON.stringify(report, null, 2));
+		if (report.checks.some((c) => c.status === "error")) process.exitCode = 1;
+		return;
+	}
 	assertNode();
 	validateDependencies();
-	const command = args[0] || "validate";
-	if (command === "bootstrap") {
-		bootstrap();
-		console.log("Isolated profile ready at .poly/agent. No login or provider requests were made.");
-		return;
-	}
-	if (command === "recipe") {
-		selectRecipe(args[1]);
-		return;
-	}
-	if (command === "pi") {
-		await runNativePi(args.slice(1));
-		return;
-	}
-	const policy = validateProfile();
-	const platform = loadPlatform(PROFILE);
-	validateIntegrations(PROFILE);
+	if (await setupCommand(command, args, profile, project)) return;
+	const policy = validateProfile(profile);
+	const platform = loadPlatform(profile, project);
+	validateIntegrations(profile);
 	for (const instance of platform.providers) validateInstanceDefinition(instance);
 	if (command === "qualify") {
 		console.log(JSON.stringify(qualificationPlan(args[1], policy, platform.providers), null, 2));
@@ -152,36 +164,58 @@ export async function main(args: string[]): Promise<void> {
 		return;
 	}
 	if (command !== "launch")
-		throw new Error("Commands: bootstrap, recipe NAME, validate, qualify PROVIDER, launch");
+		throw new Error("Commands: doctor, bootstrap, recipe NAME, validate, qualify PROVIDER, launch");
 	assertEnvironment(process.env);
-	assertProjectConfiguration(process.cwd());
+	assertProjectConfiguration(project);
 	if (!process.stdin.isTTY || !process.stdout.isTTY)
 		throw new Error("Managed Pi launch requires an interactive terminal");
 	const trusted = args.includes("--trust-native-resources");
 	const launch = launchArguments(args.slice(1).filter((arg) => arg !== "--trust-native-resources"));
-	if (trusted) trustInteractiveResources(PROFILE);
-	assertInteractiveResourceTrust(PROFILE);
-	await spawnPi(launch);
+	if (trusted) trustInteractiveResources(profile);
+	assertInteractiveResourceTrust(profile);
+	await spawnPi(launch, profile, project);
+}
+
+async function setupCommand(
+	command: string,
+	args: string[],
+	profile: string,
+	project: string,
+): Promise<boolean> {
+	if (command === "bootstrap") {
+		bootstrap(profile);
+		console.log(
+			`Isolated profile ready at ${profile}. Next: select a recipe, run doctor, then launch. No login or provider requests were made.`,
+		);
+	} else if (command === "recipe") selectRecipe(args[1], profile);
+	else if (command === "pi") await runNativePi(args.slice(1), profile, project);
+	else return false;
+	return true;
 }
 
 /** Forward resource management to the pinned Pi CLI. Installation is an explicit trusted-code action. */
-export async function runNativePi(args: string[]): Promise<void> {
+export async function runNativePi(
+	args: string[],
+	profile = PROFILE,
+	project = process.cwd(),
+): Promise<void> {
 	if (!["install", "remove", "list", "config"].includes(args[0]))
 		throw new Error("Native resource commands: pi install, remove, list, config");
-	bootstrap();
+	bootstrap(profile);
 	if (["install", "config"].includes(args[0])) {
 		console.log(
 			"Native Pi resources run as trusted application code. Installation may run dependency scripts. Workers do not inherit these extensions or privileges.",
 		);
-		trustInteractiveResources(PROFILE);
+		trustInteractiveResources(profile);
 	}
-	await spawnPi(args);
+	await spawnPi(args, profile, project);
 }
-async function spawnPi(args: string[]): Promise<void> {
+async function spawnPi(args: string[], profile: string, project: string): Promise<void> {
 	const cli = join(ROOT, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 	const child = spawn(process.execPath, [cli, ...args], {
 		stdio: "inherit",
-		env: { ...process.env, PI_CODING_AGENT_DIR: PROFILE, PI_POLY_PROFILE: PROFILE },
+		cwd: project,
+		env: { ...process.env, PI_CODING_AGENT_DIR: profile, PI_POLY_PROFILE: profile },
 	});
 	const forward = (signal: NodeJS.Signals) => {
 		if (child.exitCode === null) child.kill(signal);

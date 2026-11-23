@@ -7,9 +7,12 @@ export type FailureCode =
 	| "context"
 	| "tool"
 	| "policy"
+	| "budget"
 	| "output"
 	| "unknown";
 const MESSAGES: Record<FailureCode, string> = {
+	budget:
+		"Worker request budget exhausted. Inspect preserved results before explicitly starting replacement work. No continuation was sent.",
 	authentication:
 		"Authentication unavailable or rejected. Use the supported /login path, then explicitly replace the task.",
 	unavailable: "Provider unavailable. Check provider status before explicitly replacing the task.",

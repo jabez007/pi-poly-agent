@@ -23,6 +23,7 @@ jobs:
       - run: npm run recipe -- minimal
       - run: npm run bootstrap
       - run: npm run validate
+      - run: npm run doctor
       - name: Validate a nontrivial recipe without replacing the minimal profile
         run: |
           node --import tsx --input-type=module -e '

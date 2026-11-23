@@ -56,6 +56,7 @@ export interface Task {
 	role: Role;
 	provider: string;
 	model: string;
+	requestBudget?: RequestBudget;
 	depth: number;
 	brief: string;
 	context: string;
@@ -98,12 +99,17 @@ export interface RunInput {
 	session?(file: string): void;
 }
 export type TaskRunner = (input: RunInput) => Promise<TaskResult>;
+export interface RequestBudget {
+	requests: number;
+	outputTokens: number;
+}
 export interface Dispatch {
 	parent: string;
 	workflowStep?: string;
 	role: Role;
 	provider: string;
 	model: string;
+	requestBudget?: RequestBudget;
 	brief: string;
 	context?: string;
 	depth?: number;
@@ -362,6 +368,7 @@ export class TaskManager {
 					if (replacement) planned.base = replacement.workspace.base;
 					task = {
 						...input,
+						requestBudget: intersectRequestBudget(input.requestBudget, replacement?.requestBudget),
 						context: input.context || "",
 						id,
 						depth: 1,
@@ -604,6 +611,7 @@ function assertAgentModel(input: Dispatch, capabilities: Capabilities): void {
 }
 
 function validateDispatch(input: Dispatch): void {
+	validateRequestBudget(input.requestBudget);
 	if (!input.role.name || typeof input.role.instructions !== "string")
 		throw new Error("Invalid agent definition");
 	if (!input.brief.trim() || input.brief.length > 6000 || (input.context || "").length > 16000)
@@ -611,6 +619,30 @@ function validateDispatch(input: Dispatch): void {
 	if (!input.model || !/^[\w.:[\]-]+$/.test(input.model))
 		throw new Error("Choose an explicit worker model");
 	assertNoSecrets(input);
+}
+
+export function validateRequestBudget(budget?: RequestBudget): void {
+	if (!budget) return;
+	if (
+		!Number.isInteger(budget.requests) ||
+		budget.requests < 1 ||
+		budget.requests > 64 ||
+		!Number.isInteger(budget.outputTokens) ||
+		budget.outputTokens < 64 ||
+		budget.outputTokens > 4096
+	)
+		throw new Error("Invalid explicit worker request budget");
+}
+function intersectRequestBudget(
+	current?: RequestBudget,
+	previous?: RequestBudget,
+): RequestBudget | undefined {
+	if (!previous) return current;
+	if (!current) return previous;
+	return {
+		requests: Math.min(current.requests, previous.requests),
+		outputTokens: Math.min(current.outputTokens, previous.outputTokens),
+	};
 }
 
 function assertIntegrationSnapshot(task: Task): void {

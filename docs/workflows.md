@@ -14,13 +14,17 @@ node --import "$pi_poly_checkout/node_modules/tsx/dist/loader.mjs" "$pi_poly_che
 
 Use Node 22.19 or newer. This command uses the checkout's isolated `.poly/agent` profile. Add `--continue` or `--resume` for Pi's native session history. No shell, tmux, Neovim, or Lazygit changes are required.
 
-Unknown project `.pi/settings.json`, `models.json`, and `mcp.json` files cause launch to stop for review. They are preserved. Parent sessions retain Pi's normal AGENTS.md discovery. Workers receive fresh context and must read relevant AGENTS.md files through their scoped tools.
+Project resources use Pi's native trust decision. The managed profile still rejects unsafe authentication/proxy, retry and compaction overrides. Parent sessions retain Pi's normal AGENTS.md discovery. Workers receive fresh context and must read relevant AGENTS.md files through their scoped tools. See [native resource trust](pi-ecosystem.md) rather than treating all project configuration as forbidden.
+
+For a separate development profile or project, add `--profile /absolute/path/to/agent --project /absolute/path/to/repository` to the managed command. `npm run doctor` and `/poly-doctor` report prerequisites without executing models. [Getting started](getting-started.md) gives the short installation path.
 
 ## Implement with guided independent review
 
 Select the `implementation-review` recipe, then run `/workflow implementation-review Objective and acceptance criteria` or its `/implement` alias. Select an authorized Builder and a different provider/model for review. Pi previews each focused packet and asks for each launch. When the builder completes, accept the review offer. The final action picker can show the diff and review findings, then ask whether to integrate. Declining any prompt preserves existing results and worktrees.
 
 Use `/tasks` for a compact list with elapsed time, operation, provider/model, branch, result availability, and integration state. Select a task for its next action. `/tasks all` prints every record without opening a picker. Guided offers stop when switching or shutting down Pi sessions. Restart never starts a reviewer automatically.
+
+`/workflow` without arguments selects any configured recipe. `/delegate` selects an agent. `/task` selects a task and its actions; unique ID prefixes also work with explicit commands. `/workflow-runs` selects preserved runs and offers checkpoint continuation for interrupted work. Every continuation still requires confirmation and revalidation. Workflow approval requirements have a separate optional status indicator.
 
 ## Delegate implementation
 

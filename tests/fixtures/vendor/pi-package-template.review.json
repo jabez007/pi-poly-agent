@@ -1,0 +1,17 @@
+{
+  "name": "pi-package-template",
+  "version": "1.2.0",
+  "tarball": "https://registry.npmjs.org/pi-package-template/-/pi-package-template-1.2.0.tgz",
+  "integrity": "sha512-sQlQL849JZvNgNhkICGFiy0va6/LeRHgq1T4g3l+gmOy/M7fBSOHTxUZ+1lyDg19NRkPLodR9t+21a8Oy929sA==",
+  "license": "MIT",
+  "files": {
+    "LICENSE": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+    "package.json": "0d052d3f25cc2ccd5da1919b9f17ca3e6cef785ddf699f63931ab5eba5bf1048",
+    "themes/template.json": "82f117948ec4b0c2f0f72bf7cfa6d4c2c718af6a6a4c8697381ddbc77c3b6ff4",
+    "CHANGELOG.md": "2f2d975db19f3b87c2adbeb6325ef5b356af70b04bb89fc23afd75103d811431",
+    "prompts/hello.md": "364c3bd60c3e56f1aacfb895ed65f5915c94261f61871c0c33b21098e5aae2a1",
+    "README.md": "e719f25aff5c83c92b5462127383d5b3e6fde3d75d469666bcca3f4be9b9116b",
+    "skills/hello/SKILL.md": "a6130f6c42e5f61a2c63d91b358c884ebb2d8b22b1f52dc42bd0032a2e92d24a",
+    "extensions/index.ts": "67c829a073a1057c3d32cae02301e2f1ccd8e8c035c1c2d91d404ad54e330bd0"
+  }
+}

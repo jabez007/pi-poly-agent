@@ -21,6 +21,8 @@ export interface PlatformConfig {
 	timeoutMs: number;
 	ui: { status: boolean; notifications: boolean };
 	context: string[];
+	/** Applied layers in precedence order, without duplicating their configuration values. */
+	sources?: { source: string; kind: string }[];
 }
 const agentRestrictions = new WeakMap<PlatformConfig, Map<string, Partial<ExecutionPolicy>>>();
 function retainAgentRestrictions(result: PlatformConfig): void {
@@ -227,11 +229,13 @@ export function loadPlatform(
 		timeoutMs: 900000,
 		ui: { status: true, notifications: true },
 		context: ["native"],
+		sources: [],
 	};
 	const profileFile = join(profile, "platform.json");
 	const projectFile = projectConfiguration(cwd);
 	const files = [userFile, profileFile, projectFile].filter(existsSync);
 	if (!files.length && !invocation) {
+		result.sources!.push({ source: join(profile, "orchestration.json"), kind: "legacy" });
 		result.legacy = true;
 		const legacy = loadOrchestration(profile);
 		result.agents = legacy.roles;
@@ -254,6 +258,7 @@ export function loadPlatform(
 			"invocation configuration",
 		);
 		apply(result, invocation, cwd, true);
+		result.sources!.push({ source: "<invocation>", kind: "invocation" });
 	}
 	result.concurrency = result.policy.concurrency ?? result.concurrency;
 	result.timeoutMs = result.policy.timeoutMs ?? result.timeoutMs;
@@ -279,6 +284,7 @@ function fileLayer(
 		identifier(name);
 		const recipe = join(import.meta.dirname, "../../recipes", `${name}.json`);
 		apply(result, read(recipe), dirname(recipe), project);
+		recordSource(result, recipe, "recipe");
 	}
 	if (project && (raw.packages || raw.providers || raw.compatibility))
 		throw new Error(
@@ -294,8 +300,17 @@ function fileLayer(
 			);
 		const file = packageConfiguration(profile, packageFile);
 		apply(result, read(file), dirname(file), false);
+		recordSource(result, file, "package");
 	}
 	apply(result, raw, dirname(file), project);
+	recordSource(result, file, layerKind(file, profile, project));
+}
+function recordSource(result: PlatformConfig, source: string, kind: string): void {
+	(result.sources ||= []).push({ source, kind });
+}
+function layerKind(file: string, profile: string, project: boolean): string {
+	if (project) return "project";
+	return file === join(profile, "platform.json") ? "profile" : "user";
 }
 function packageConfiguration(profile: string, file: string): string {
 	return file.startsWith("pi:")

@@ -4,7 +4,7 @@ import { ProviderRegistry, nativeWorkerProvider } from "../platform/providers.ts
 import { emptyResources, workerTools, resourceInstructions } from "../platform/resources.ts";
 import type { WorkerResources } from "../platform/contracts.ts";
 export { nativeWorkerProvider } from "../platform/providers.ts";
-import { safeFailure } from "./errors.ts";
+import { safeFailure, WorkerFailure } from "./errors.ts";
 import { untilCanceled } from "./cancellation.ts";
 import { protectedWorkerProvider } from "./stream.ts";
 import { mkdirSync } from "node:fs";
@@ -18,9 +18,10 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { Provider } from "@earendil-works/pi-ai";
 import { assertEnvironment, guardedProvider } from "../policy.ts";
 import { assertSafeProfile, loadPolicy } from "../profile.ts";
-import { validateTaskResult, type Task, type TaskRunner } from "./tasks.ts";
+import { validateTaskResult, validateRequestBudget, type Task, type TaskRunner } from "./tasks.ts";
 import { scopedTools, testTool, diffTool, type ApproveTest } from "./tools.ts";
 
 export function taskPrompt(task: Task): string {
@@ -48,6 +49,7 @@ export function createPiRunner(
 ): TaskRunner {
 	return async ({ task, signal, progress, session: recordSession }) => {
 		assertEnvironment(process.env);
+		validateRequestBudget(task.requestBudget);
 		const policy = loadPolicy(profile);
 		registry.assert(task.provider, task.depth);
 		const execution = effectivePolicy(agentPolicy(task.role), task.effectivePolicy || {});
@@ -70,7 +72,9 @@ export function createPiRunner(
 		if (task.provider === "kimi-coding" && !policy.kimiApiKey) provider.auth.apiKey = undefined;
 		new ModelRegistry(runtime).registerProvider(
 			guardedProvider(
-				protectedWorkerProvider(provider, () => progress("Receiving worker response")),
+				protectedWorkerProvider(budgetedProvider(provider, task), () =>
+					progress("Receiving worker response"),
+				),
 				() => {
 					registry.assert(task.provider, task.depth);
 					if (signal.aborted) throw new Error("Canceled worker request");
@@ -139,6 +143,25 @@ export function createPiRunner(
 			unsubscribe();
 			session.dispose();
 		}
+	};
+}
+
+/** Bounds qualification and other explicitly budgeted tasks at the actual invocation boundary. */
+function budgetedProvider(provider: Provider, task: Task): Provider {
+	if (!task.requestBudget) return provider;
+	const budget = task.requestBudget;
+	let requests = 0;
+	const invoke = (method: "stream" | "streamSimple", model: any, context: any, options: any) => {
+		if (++requests > budget.requests) throw new WorkerFailure("budget");
+		return provider[method](model, context, {
+			...options,
+			maxTokens: Math.min(budget.outputTokens, model.maxTokens, options?.maxTokens ?? Infinity),
+		});
+	};
+	return {
+		...provider,
+		stream: (m, c, o) => invoke("stream", m, c, o),
+		streamSimple: (m, c, o) => invoke("streamSimple", m, c, o),
 	};
 }
 

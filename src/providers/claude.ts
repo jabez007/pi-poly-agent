@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { BRIDGE_PROVIDER, assertInvocationEnvironment, type Activation } from "../policy.ts";
 import { attestRuntime, readConfiguration } from "../profile.ts";
@@ -16,7 +16,8 @@ export async function registerClaudeBridge(
 			baseUrl: "locked://claude-sdk",
 			apiKey: "runtime-owned",
 			api: "claude-bridge",
-			models: anthropicProvider()
+			models: builtinProviders()
+				.find((provider) => provider.id === "anthropic")!
 				.getModels()
 				.map((model) => ({ ...model, name: `${model.name} [locked]` })),
 			streamSimple: () => {

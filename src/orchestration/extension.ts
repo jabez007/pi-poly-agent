@@ -2,7 +2,7 @@ import { agentPolicy, effectivePolicy, type ExecutionPolicy } from "../platform/
 import { existsSync } from "node:fs";
 import { loadPlatform } from "../platform/config.ts";
 import { ProviderRegistry } from "../platform/providers.ts";
-import { WorkflowEngine } from "../platform/workflows.ts";
+import { WorkflowEngine, type WorkflowRun } from "../platform/workflows.ts";
 import { emptyResources } from "../platform/resources.ts";
 import type { WorkerResources } from "../platform/contracts.ts";
 import { taskContext } from "./context.ts";
@@ -38,6 +38,19 @@ export function registerOrchestration(
 	const published = new Set<string>();
 	const preparations = new Set<AbortController>();
 	const config = () => loadPlatform(profile, current?.cwd);
+	async function chooseTask(ctx: ExtensionContext, id?: string): Promise<Task | undefined> {
+		const all = tasks(ctx).list().reverse();
+		if (id) {
+			const matches = all.filter((t) => t.id.startsWith(id));
+			if (matches.length !== 1)
+				throw new Error("Unknown or ambiguous task reference. Use /tasks to select one.");
+			return matches[0];
+		}
+		if (!ctx.hasUI || ctx.mode !== "tui" || !all.length) return;
+		const choices = all.slice(0, 20).map((t) => taskLine(t));
+		const picked = await ctx.ui.select("Select task", choices);
+		return picked ? all[choices.indexOf(picked)] : undefined;
+	}
 	function configure(): void {
 		for (const instance of config().providers)
 			if (!registered.has(instance.id)) {
@@ -63,7 +76,7 @@ export function registerOrchestration(
 				active.length
 					? active
 							.slice(0, 4)
-							.map((t) => `${t.id.slice(0, 8)} ${t.role.name}: ${t.progress}`)
+							.map((t) => taskLine(t))
 							.join(" | ")
 					: "Workers idle | /tasks",
 			);
@@ -243,6 +256,7 @@ export function registerOrchestration(
 		reviewOf?: string,
 		replacementOf?: string,
 		workflowReviewModel?: string,
+		requestBudget?: Dispatch["requestBudget"],
 	): Promise<Task | undefined> {
 		const epoch = generation;
 		if (!ctx.hasUI || ctx.mode !== "tui")
@@ -272,7 +286,7 @@ export function registerOrchestration(
 				`Launch ${role.name} with ${model}?`,
 				replacementOf
 					? "Create a NEW worker from preserved source changes. This captures a task-only snapshot, retains the original task, and does not restore provider-private execution state."
-					: `Independent session, isolated worktree. Permissions: ${execution.permissions.join(", ")}. Tools: ${execution.tools.join(", ")}. Test commands require separate approval. Provider plan usage applies.`,
+					: launchDescription(execution, registry.get(provider), requestBudget),
 			))
 		)
 			return;
@@ -287,6 +301,7 @@ export function registerOrchestration(
 			reviewOf,
 			replacementOf,
 			workflowReviewModel,
+			requestBudget,
 		};
 		if (epoch !== generation || stopped) throw new Error("Session changed; task launch canceled");
 		const task = list.dispatch(input);
@@ -296,7 +311,15 @@ export function registerOrchestration(
 	async function delegate(args: string, ctx: ExtensionContext): Promise<void> {
 		current = ctx;
 		configure();
-		const [name, model, ...words] = args.trim().split(/\s+/);
+		const [requested, model, ...words] = args.trim().split(/\s+/);
+		const name =
+			requested ||
+			(ctx.hasUI && ctx.mode === "tui"
+				? await ctx.ui.select(
+						"Select agent",
+						config().agents.map((a) => a.name),
+					)
+				: undefined);
 		const chosenRole = config().agents.find((r) => r.name === name);
 		if (!chosenRole) {
 			ctx.ui.notify(
@@ -342,6 +365,41 @@ export function registerOrchestration(
 		description: "Launch a focused independent agent",
 		handler: delegate,
 	});
+	pi.registerCommand("poly-qualify", {
+		description: "Explicitly approve one bounded, tool-free provider qualification request",
+		handler: async (args, ctx) => {
+			current = ctx;
+			if (!ctx.hasUI || ctx.mode !== "tui")
+				throw new Error("Qualification requires direct interactive approval");
+			const role: Role = {
+				name: "qualification-probe",
+				editing: false,
+				instructions:
+					"This is a bounded qualification observation. Do not call any tools. Return the required structured JSON with a short summary and empty arrays. Do not claim any other capability was verified.",
+				context: ["native"],
+				policy: {
+					permissions: ["read"],
+					tools: [],
+					skills: [],
+					extensions: [],
+					timeoutMs: 30000,
+					contextBudget: 512,
+				},
+			};
+			const model = await modelChoice(ctx, role, args.trim() || undefined);
+			if (model)
+				await launch(
+					ctx,
+					role,
+					"Return a brief response confirming this single request completed. No tool, cancellation, quota, or multi-agent qualification is implied.",
+					model,
+					undefined,
+					undefined,
+					undefined,
+					{ requests: 1, outputTokens: 512 },
+				);
+		},
+	});
 	pi.registerCommand("tasks", {
 		description: "Inspect active and recovered work, results, and next actions",
 		handler: async (args, ctx) => {
@@ -357,7 +415,13 @@ export function registerOrchestration(
 		if (!ctx.hasUI || ctx.mode !== "tui")
 			throw new Error("Workflow requires interactive authorization");
 		current = ctx;
-		const [name, ...words] = args.trim().split(/\s+/);
+		const [requested, ...words] = args.trim().split(/\s+/);
+		const name =
+			requested ||
+			(await ctx.ui.select(
+				"Select workflow",
+				config().workflows.map((w) => w.id),
+			));
 		const definition = config().workflows.find((w) => w.id === name);
 		if (!definition) {
 			ctx.ui.notify(
@@ -421,6 +485,13 @@ export function registerOrchestration(
 						: false;
 				},
 				changed: (run) => {
+					if (config().ui.status)
+						ctx.ui.setStatus(
+							"poly-workflow",
+							run.status === "waiting_approval"
+								? `Workflow ${run.id.slice(0, 8)}: approval required`
+								: undefined,
+						);
 					if (
 						config().ui.notifications &&
 						["completed", "failed", "interrupted"].includes(run.status)
@@ -441,8 +512,15 @@ export function registerOrchestration(
 	pi.registerCommand("workflow-runs", {
 		description: "Inspect, cancel, or explicitly continue interrupted workflow runs",
 		handler: async (args, ctx) => {
-			const [id, action] = args.trim().split(/\s+/);
+			let [id, action] = args.trim().split(/\s+/);
 			const engine = workflowHost(ctx);
+			if (!id) {
+				ctx.ui.notify(JSON.stringify(engine.list(), null, 2), "info");
+				const chosen = await selectRun(ctx, engine.list());
+				if (!chosen) return;
+				id = chosen.id;
+				action = chosen.action;
+			}
 			if (id && action === "cancel") await engine.cancel(id);
 			if (id && action === "continue") {
 				const approved = await ctx.ui.confirm(
@@ -464,7 +542,8 @@ export function registerOrchestration(
 			description: "Launch an independent read-only review of a completed editing task",
 			handler: async (args, ctx) => {
 				const [id, explicit] = args.trim().split(/\s+/);
-				const builder = tasks(ctx).get(id);
+				const builder = await chooseTask(ctx, id);
+				if (!builder) return;
 				const role = inspectionAgent();
 				const choice = await modelChoice(ctx, role, explicit);
 				if (choice)
@@ -480,9 +559,15 @@ export function registerOrchestration(
 	pi.registerCommand("task", {
 		description: "Inspect, cancel, diff, integrate, or clean a task",
 		handler: async (args, ctx) => {
-			const [id, action = "show", ...command] = args.trim().split(/\s+/);
+			const [reference, action = "show", ...command] = args.trim().split(/\s+/);
 			const list = tasks(ctx);
-			const task = list.get(id);
+			const task = await chooseTask(ctx, reference);
+			if (!task) return;
+			if (!reference) {
+				await taskActions(ctx, task);
+				return;
+			}
+			const id = task.id;
 			if (action === "cancel") {
 				await list.cancel(id);
 				return;
@@ -508,14 +593,7 @@ export function registerOrchestration(
 				return;
 			}
 			if (action === "cleanup") {
-				if (task.status === "running") throw new Error("Cancel the task before cleanup");
-				if (
-					await ctx.ui.confirm(
-						"Remove this clean task worktree?",
-						`${task.workspace.path}\nThe branch and snapshot commits are retained.`,
-					)
-				)
-					cleanupWorkspace(task.workspace);
+				await cleanupTask(ctx, task);
 				return;
 			}
 			ctx.ui.notify(formatTask(task), "info");
@@ -636,6 +714,25 @@ async function integrateTask(
 		manager.integrate(task.id);
 }
 
+async function selectRun(
+	ctx: ExtensionContext,
+	runs: WorkflowRun[],
+): Promise<{ id: string; action: string } | undefined> {
+	if (!ctx.hasUI || ctx.mode !== "tui" || !runs.length) return;
+	const choices = runs.map((r) => `${r.id.slice(0, 8)} ${r.definition.id}: ${r.status}`);
+	const selected = await ctx.ui.select("Select workflow run", choices);
+	const run = selected ? runs[choices.indexOf(selected)] : undefined;
+	if (!run) return;
+	const actions = ["Inspect preserved results", "Leave for later"];
+	if (run.status === "interrupted") actions.unshift("Continue from validated checkpoints");
+	if (["running", "waiting_approval"].includes(run.status)) actions.push("Cancel workflow");
+	const choice = await ctx.ui.select("Workflow actions", actions);
+	if (choice === "Continue from validated checkpoints") return { id: run.id, action: "continue" };
+	if (choice === "Cancel workflow") return { id: run.id, action: "cancel" };
+	if (choice === "Inspect preserved results") ctx.ui.notify(JSON.stringify(run, null, 2), "info");
+	return;
+}
+
 function parseTaskPacket(text: string): { brief: string; context: string } {
 	try {
 		const value = JSON.parse(text);
@@ -661,4 +758,28 @@ function assertPreparation(
 	if (!permissions.includes("write")) throw new Error("Preparation requires an editing task");
 	if (command && (!permissions.includes("test") || !permissions.includes("read")))
 		throw new Error("Preparation command requires effective read, write and test permissions");
+}
+
+async function cleanupTask(ctx: ExtensionContext, task: Task): Promise<void> {
+	if (task.status === "running") throw new Error("Cancel the task before cleanup");
+	if (
+		ctx.hasUI &&
+		ctx.mode === "tui" &&
+		(await ctx.ui.confirm(
+			"Remove this clean task worktree?",
+			`${task.workspace.path}\nThe branch and snapshot commits are retained.`,
+		))
+	)
+		cleanupWorkspace(task.workspace);
+}
+
+function launchDescription(
+	execution: ExecutionPolicy,
+	instance: { authentication?: string; billing: string },
+	budget?: Dispatch["requestBudget"],
+): string {
+	const limit = budget
+		? `At most ${budget.requests} generation, ${budget.outputTokens} requested output tokens; 30-second task timeout. Token enforcement depends on provider support; this is not a monetary cap.`
+		: "Provider plan usage applies.";
+	return `Independent session, isolated worktree. Authentication: ${instance.authentication}. Billing: ${instance.billing}. Permissions: ${execution.permissions.join(", ")}. Tools: ${execution.tools.join(", ") || "none"}. Test commands require separate approval. ${limit}`;
 }

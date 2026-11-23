@@ -6,3 +6,4 @@ LICENSE
 .agents
 .codex
 .aws
+tests/fixtures/vendor

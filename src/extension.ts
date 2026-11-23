@@ -1,6 +1,7 @@
 import { loadIntegrations } from "./platform/integrations.ts";
+import { doctor, formatDoctor } from "./doctor.ts";
 import { loadPlatform } from "./platform/config.ts";
-import { ProviderRegistry } from "./platform/providers.ts";
+import { ProviderRegistry, nativeWorkerProvider } from "./platform/providers.ts";
 import { ContextRegistry, nativeContext, memPalaceContext } from "./platform/context.ts";
 import type { ContextBackend } from "./platform/context.ts";
 import type { WorkerResources } from "./platform/contracts.ts";
@@ -8,9 +9,6 @@ import { focusedContext } from "./orchestration/context.ts";
 import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
 import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
-import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
 	ExtensionAPI,
@@ -56,6 +54,11 @@ export default async function polyExtension(
 	} = {},
 ): Promise<void> {
 	const profile = process.env.PI_POLY_PROFILE || PROFILE;
+	pi.registerCommand("poly-doctor", {
+		description: "Inspect configuration, resources and eligibility without executing a provider",
+		handler: async (_args, context) =>
+			context.ui.notify(formatDoctor(await doctor(profile, context.cwd)), "info"),
+	});
 	const policy = validateProfile(profile);
 	const platform = loadPlatform(profile);
 	const memoryEnabled = usesMemPalace(platform, policy.memory.enabled);
@@ -109,12 +112,12 @@ export default async function polyExtension(
 			},
 		});
 	}
-	const codex = openaiCodexProvider();
+	const codex = nativeWorkerProvider("openai-codex");
 	pi.registerProvider(guardedProvider(codex, () => check(codex.id)));
-	const kimi = kimiCodingProvider();
+	const kimi = nativeWorkerProvider("kimi-coding");
 	if (!policy.kimiApiKey) kimi.auth.apiKey = undefined;
 	pi.registerProvider(guardedProvider(kimi, () => check(kimi.id)));
-	const zai = zaiProvider();
+	const zai = nativeWorkerProvider("zai");
 	pi.registerProvider(guardedProvider(zai, () => check(zai.id)));
 
 	registerInstanceProviders(pi, providers);

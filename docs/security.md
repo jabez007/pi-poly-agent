@@ -4,6 +4,8 @@ Assessment date: November 21, 2026. No Anthropic or Google account was authentic
 
 ## Account protection
 
+For current v0.5 observations, see [qualification evidence](qualification.md#v05-provider-and-orchestration-evidence). Doctor is read-only; its capability report is not proof of valid authentication. `/poly-qualify` is an explicitly approved, one-generation tool-free worker request for eligible providers only. It cannot activate Claude/Google workers, change billing or silently continue after its budget. Offline self-development fixtures use no account credentials. The established provider, sandbox and integration trust rules below remain in force.
+
 The default policy locks Claude and Google. Their real runtime paths require explicit activation, the current review revision, an absolute executable path, and a matching SHA-256 digest. The Google discovery command also asks the user before starting the runtime. Pi startup runs offline. No installer or CI job starts either runtime.
 
 Anthropic's application-authentication distinction remains unresolved for this personal SDK frontend. The official documentation permits native sign-in under stated conditions and separately restricts third-party subscription authentication. Resolve that applicability before activating the bridge. See [Anthropic's legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance).

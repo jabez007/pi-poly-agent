@@ -13,6 +13,7 @@ npm ci --ignore-scripts
 npm run bootstrap
 npm run recipe -- minimal
 npm run validate
+npm run doctor
 npm start
 ```
 
@@ -21,6 +22,8 @@ npm start
 The `minimal` recipe has no agent definitions, workflows, external memory, or worker status display. Use Pi's `/login` for native Codex or Kimi authentication and `/model` to switch. Z.AI requires coding-plan opt-in. Claude SDK and Google ACP start locked. See [provider setup](docs/providers.md).
 
 Existing profiles without platform configuration retain the v0.3 compatibility agents and commands. Nothing migrates or deletes task history automatically.
+
+[Getting started](docs/getting-started.md) covers one-agent delegation, custom workflows, separate profiles, recovery and removal. All managed commands accept explicit `--profile PATH` and `--project PATH`. `/poly-doctor` shows configuration and resource diagnostics inside Pi without resolving credentials or running third-party code.
 
 ## Bring your Pi customizations
 
@@ -65,6 +68,8 @@ The same commands work with arbitrary agent and workflow names:
 /workflow-runs
 ```
 
+Omit names or IDs in `/delegate`, `/workflow`, `/task` and `/workflow-runs` to use native pickers. Task commands also accept unique ID prefixes. Parent model selection and running child models remain independent.
+
 Editing permissions come from intersected policies, not agent names. Agents may select approved tools, instruction skills, context sources, provider instances, and execution limits. [Configuration and extension contracts](docs/platform.md) describe layering, packages, custom endpoints, trusted integrations, and complete examples.
 
 ## Reliability and account protections
@@ -86,6 +91,8 @@ npm run qualify -- openai-codex
 ```
 
 Tests use temporary authentication stores and deterministic transports. The opt-in sandbox tests need Linux namespace support. Qualification prints a manual checklist without authentication or provider requests.
+
+`npm run dogfood:offline` exercises a documentation change and independent review against a disposable clone of this repository, with real Pi SDK workers and a Bubblewrap acceptance test. It preserves results for inspection and never integrates into this checkout. See [dogfooding](docs/dogfooding.md) for the live exercise you must personally initiate, and [qualification evidence](docs/qualification.md) for observed compatibility and limitations.
 
 **No live subscription execution has been qualified.** Mocked provider scenarios and a loopback fake OpenAI-compatible server establish local behavior only. Worker session continuation, recursive delegation, network-enabled worker tools, and arbitrary Pi extension hooks inside workers remain unsupported. Executable integrations require directory inventories or explicit entry-only trust; project JSON never imports code. See [migration](docs/migration-v04.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and optional [terminal integrations](docs/terminal.md).
 

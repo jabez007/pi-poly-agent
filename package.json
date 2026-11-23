@@ -1,6 +1,6 @@
 {
 	"name": "pi-poly-agent",
-	"version": "0.4.2",
+	"version": "0.5.0",
 	"private": true,
 	"type": "module",
 	"license": "GPL-3.0-or-later",
@@ -9,6 +9,8 @@
 	},
 	"scripts": {
 		"pi": "node --import tsx scripts/cli.ts pi",
+		"doctor": "node --import tsx scripts/cli.ts doctor",
+		"dogfood:offline": "node --import ./tests/isolate.mjs --import tsx scripts/dogfood-offline.ts",
 		"bootstrap": "node --import tsx scripts/cli.ts bootstrap",
 		"qualify": "node --import tsx scripts/cli.ts qualify",
 		"validate": "node --import tsx scripts/cli.ts validate",

@@ -1,8 +1,8 @@
 import { createProvider, getDeclaredTools, type Provider } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { kimiCodingProvider } from "@earendil-works/pi-ai/providers/kimi-coding";
-import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
+// Pi 1.5.2's jiti prefix alias corrupts pi-ai/api subpaths. Use the launcher's
+// exact installed pin until upstream supports this subpath; this is still Pi's transport.
+import { openAICompletionsApi } from "../../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.lazy.js";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import {
 	ACP_PROVIDER,
 	BRIDGE_PROVIDER,
@@ -29,14 +29,10 @@ export interface ProviderAdapter {
 	create(instance: ProviderInstance): Provider;
 }
 const reserved = ["openai-codex", "kimi-coding", "zai", BRIDGE_PROVIDER, ACP_PROVIDER];
-const factories: Record<string, () => Provider> = {
-	"openai-codex": openaiCodexProvider,
-	"kimi-coding": kimiCodingProvider,
-	zai: zaiProvider,
-};
 export function nativeWorkerProvider(id: string): Provider {
-	if (!factories[id]) throw new Error("Worker provider is not supported");
-	return factories[id]();
+	if (!["openai-codex", "kimi-coding", "zai"].includes(id))
+		throw new Error("Worker provider is not supported");
+	return builtinProviders().find((provider) => provider.id === id)!;
 }
 function safeEndpoint(endpoint: string, local: boolean): string {
 	const url = new URL(endpoint);
