@@ -25,7 +25,6 @@ import {
 	inspectWorkspace,
 	integrateWorkspace,
 	assertIntegration,
-	pinWorkspace,
 	controlFileNotice,
 	git,
 	type Workspace,
@@ -235,7 +234,6 @@ export class TaskManager {
 			throw new Error("Task belongs to another project or path");
 		assertSafeProfile(task.workspace.path);
 		assertNoSecrets(task);
-		pinWorkspace(task.workspace);
 		if (["running", "created"].includes(task.status)) {
 			task.status = "interrupted";
 			task.error =

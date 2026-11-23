@@ -230,9 +230,15 @@ export function integrateWorkspace(workspace: Workspace, revision: string): void
 }
 
 export function inspectWorkspace(workspace: Workspace): string[] {
+	// Retained unavailable tasks must never fall back to repository discovery.
+	pinnedWorkspaces.set(resolve(workspace.path), { ...workspace, gitDir: undefined });
 	if (!existsSync(workspace.path))
 		return [
 			"Worktree directory is missing. Inspect its retained task branch with Git or Lazygit; no automatic recreation attempted.",
+		];
+	if (workspace.gitDir && !existsSync(workspace.gitDir))
+		return [
+			"Worktree Git metadata unavailable. Files and task history retained for manual inspection.",
 		];
 	try {
 		pinWorkspace(workspace);
