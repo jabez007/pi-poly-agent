@@ -34,11 +34,20 @@ export function draftHandoff(
 	return validateHandoff({
 		version: 1,
 		objective,
-		completed: tasks.map((t) => `${t.id}: ${t.result!.summary}`),
-		decisions: previous?.decisions || [],
-		questions: [...(previous?.questions || []), ...tasks.flatMap((t) => t.result!.questions)],
+		completed: [...new Set(tasks.map((t) => `${t.id}: ${t.result!.summary}`))],
+		decisions: [...new Set(previous?.decisions || [])],
+		questions: [
+			...new Set([...(previous?.questions || []), ...tasks.flatMap((t) => t.result!.questions)]),
+		],
 		files,
-		facts: [...(previous?.facts || []), ...findings],
+		facts: [
+			...new Map(
+				[...(previous?.facts || []), ...findings].map((fact) => [
+					JSON.stringify([fact.text, fact.source, fact.verified]),
+					fact,
+				]),
+			).values(),
+		],
 		hypotheses: [
 			...recent.map((text) => `Agent summary, unverified: ${text.slice(0, 1500)}`),
 			...(memory
@@ -74,7 +83,7 @@ export function handoffMarkdown(h: Handoff): string {
 	const facts = (verified: boolean) =>
 		list(h.facts.filter((f) => f.verified === verified).map((f) => `${f.text} | ${f.source}`));
 	const bodies = [
-		h.objective,
+		h.objective.replace(/^# /gm, "    # "),
 		list(h.completed),
 		list(h.decisions),
 		list(h.questions),

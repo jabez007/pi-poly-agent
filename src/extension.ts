@@ -315,21 +315,26 @@ export default async function polyExtension(
 		description: "Prepare a structured checkpoint in Pi's native session",
 		handler: async (_args, context) => {
 			if (!context.hasUI) return;
-			const project = projectIdentity(context.cwd);
-			const provenance = {
-				session: context.sessionManager.getSessionId(),
-				project: project.wing,
-				revision: project.revision,
-				provider: context.model?.provider || "unknown",
-				createdAt: new Date().toISOString(),
-			};
-			const draft = draftHandoff(context.sessionManager.getBranch(), provenance, recalled, handoff);
-			const edited = await context.ui.editor(
-				"Review handoff: facts use text | source. Agent summaries remain unverified.",
-				handoffMarkdown(draft),
-			);
-			if (!edited) return;
 			try {
+				const project = projectIdentity(context.cwd);
+				const provenance = {
+					session: context.sessionManager.getSessionId(),
+					project: project.wing,
+					revision: project.revision,
+					provider: context.model?.provider || "unknown",
+					createdAt: new Date().toISOString(),
+				};
+				const draft = draftHandoff(
+					context.sessionManager.getBranch(),
+					provenance,
+					recalled,
+					handoff,
+				);
+				const edited = await context.ui.editor(
+					"Review handoff: facts use text | source. Agent summaries remain unverified.",
+					handoffMarkdown(draft),
+				);
+				if (!edited) return;
 				const next = parseHandoffMarkdown(edited, provenance);
 				if (
 					!(await context.ui.confirm(
@@ -345,7 +350,10 @@ export default async function polyExtension(
 					"info",
 				);
 			} catch {
-				context.ui.notify("Invalid or sensitive checkpoint refused.", "error");
+				context.ui.notify(
+					"Checkpoint refused. Keep it within 24 KB, use valid sections, and remove sensitive content.",
+					"error",
+				);
 			}
 		},
 	});
