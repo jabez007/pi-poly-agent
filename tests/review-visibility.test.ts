@@ -94,7 +94,9 @@ test("large changes complete and bounded review paths identify every omitted fil
 	});
 	try {
 		assert.equal(host.builder.status, "completed");
-		assert.ok(host.builder.artifacts!.find((a) => a.kind === "diff")!.content.length > 70000);
+		const artifact = host.builder.artifacts!.find((a) => a.kind === "diff")!.content;
+		assert.ok(artifact.length <= 48000);
+		assert.match(artifact, /large-a\.txt.*\+900.*-0/);
 		const review = host.completed.find((t) => t.reviewOf === host.builder.id)!;
 		const output = await diffTool(review.workspace.path, review.reviewBase!).execute(
 			"fixture",

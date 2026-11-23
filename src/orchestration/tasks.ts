@@ -490,6 +490,8 @@ export class TaskManager {
 			throw new Error("Read-only worker modified files");
 		task.result.files = changes.files;
 		if (task.role.editing) task.revision = snapshotWorkspace(task.workspace);
+		if (task.revision)
+			changes.diff = reviewDiffView(task.workspace.path, task.workspace.base, task.revision);
 		task.artifacts = [
 			...(task.result.artifacts || []),
 			{ kind: "summary", content: task.result.summary, source: task.id, certainty: "claim" },

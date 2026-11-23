@@ -1,11 +1,27 @@
-import { assertNoSecrets } from "../secrets.ts";
+import { assertNoSecrets, secretScanner } from "../secrets.ts";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	realpathSync,
+	mkdtempSync,
+	openSync,
+	closeSync,
+	readSync,
+	rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafeProfile } from "../profile.ts";
+import { reviewDiffView } from "./review-view.ts";
 
 const pinnedWorkspaces = new Map<string, Workspace>();
 const taskDirectories = new Set<string>();
+const metadataBufferLimit = 2 * 1024 * 1024;
 
 /** Internal registration from the task controller; never inferred from task-owned files. */
 export function registerTaskDirectory(directory: string): void {
@@ -16,7 +32,7 @@ function containsPath(root: string, target: string): boolean {
 	return !path || (!path.startsWith("..") && !isAbsolute(path));
 }
 
-export function git(cwd: string, args: string[]): string {
+function gitInvocation(cwd: string, args: string[]) {
 	const workspace = [...pinnedWorkspaces.values()].find((w) => containsPath(w.path, cwd));
 	if (!workspace && [...taskDirectories].some((directory) => containsPath(directory, cwd)))
 		throw new Error("Unregistered task worktree has no pinned workspace; inspect manually");
@@ -24,32 +40,91 @@ export function git(cwd: string, args: string[]): string {
 	const env = Object.fromEntries(
 		Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
 	);
+	return {
+		cwd,
+		env,
+		args: [
+			"-c",
+			"core.hooksPath=/dev/null",
+			"-c",
+			"core.fsmonitor=false",
+			"-c",
+			"diff.ignoreSubmodules=all",
+			...location,
+			...submoduleSafeArgs(args, !!workspace),
+		],
+	};
+}
+export function git(cwd: string, args: string[]): string {
+	const invocation = gitInvocation(cwd, args);
 	try {
-		return execFileSync(
-			"git",
-			[
-				"-c",
-				"core.hooksPath=/dev/null",
-				"-c",
-				"core.fsmonitor=false",
-				"-c",
-				"diff.ignoreSubmodules=all",
-				...location,
-				...submoduleSafeArgs(args, !!workspace),
-			],
-			{
-				cwd,
-				env,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-				maxBuffer: 2 * 1024 * 1024,
-				timeout: 15000,
-			},
-		).trim();
-	} catch {
+		return execFileSync("git", invocation.args, {
+			cwd: invocation.cwd,
+			env: invocation.env,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			maxBuffer: metadataBufferLimit,
+			timeout: 15000,
+		}).trim();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOBUFS") {
+			const output = (error as { stdout?: string | Buffer }).stdout || "";
+			throw new Error(
+				`Git metadata output reached ${Buffer.byteLength(output)} bytes, exceeding the ${metadataBufferLimit} byte limit; inspect the retained task branch manually`,
+			);
+		}
 		throw new Error("Git operation failed; diagnostics withheld");
 	}
 }
+
+/** Git writes directly to a private spool; callers never buffer an entire patch. */
+export function readGitOutput(
+	cwd: string,
+	args: string[],
+	consume: (chunk: string) => boolean | void,
+	chunkSize = 65536,
+): void {
+	const invocation = gitInvocation(cwd, args);
+	const directory = mkdtempSync(join(tmpdir(), "poly-git-output-"));
+	const fd = openSync(join(directory, "output"), "wx+", 0o600);
+	try {
+		try {
+			execFileSync("git", invocation.args, {
+				cwd,
+				env: invocation.env,
+				stdio: ["ignore", fd, "ignore"],
+				timeout: 15000,
+			});
+		} catch {
+			throw new Error(
+				"Git patch output failed; check available temporary storage and inspect the retained task branch manually",
+			);
+		}
+		const buffer = Buffer.alloc(chunkSize),
+			decoder = new StringDecoder("utf8");
+		let offset = 0,
+			count: number;
+		while ((count = readSync(fd, buffer, 0, buffer.length, offset))) {
+			offset += count;
+			if (consume(decoder.write(buffer.subarray(0, count))) === false) return;
+		}
+		consume(decoder.end());
+	} finally {
+		closeSync(fd);
+		rmSync(directory, { recursive: true, force: true });
+	}
+}
+export function scanGitOutput(cwd: string, args: string[]): void {
+	const scan = secretScanner();
+	readGitOutput(cwd, args, scan);
+}
+export const reviewDiffOptions = [
+	"--text",
+	"--no-color",
+	"--no-ext-diff",
+	"--no-textconv",
+	"--no-renames",
+];
 
 function submoduleSafeArgs(args: string[], task: boolean): string[] {
 	const command = args[0] === "--literal-pathspecs" ? 1 : 0;
@@ -146,19 +221,20 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 	const files = git(workspace.path, ["diff", "--name-only", "-z", workspace.base])
 		.split("\0")
 		.filter(Boolean);
-	const diff =
-		controlFileNotice(files) +
-		renderReviewDiff(
-			git(workspace.path, [
-				"diff",
-				"--text",
-				"--no-color",
-				"--no-ext-diff",
-				"--no-textconv",
-				workspace.base,
-			]),
-		);
+	const revision = workspaceChanged(workspace.path)
+		? ""
+		: git(workspace.path, ["rev-parse", "HEAD"]);
+	const diff = reviewDiffView(workspace.path, workspace.base, revision);
 	return { files, diff };
+}
+
+function workspaceChanged(cwd: string): boolean {
+	let changed = false;
+	readGitOutput(cwd, ["status", "--porcelain"], (chunk) => {
+		changed ||= !!chunk.trim();
+		return !changed;
+	});
+	return changed;
 }
 
 export function controlFileNotice(files: string[]): string {
