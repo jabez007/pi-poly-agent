@@ -134,8 +134,8 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 	pinWorkspace(workspace);
 	// Include untracked source in the review snapshot, without committing or staging it in the user's tree.
 	git(workspace.path, ["add", "-N", "--", "."]);
-	const files = git(workspace.path, ["diff", "--name-only", workspace.base])
-		.split("\n")
+	const files = git(workspace.path, ["diff", "--name-only", "-z", workspace.base])
+		.split("\0")
 		.filter(Boolean);
 	const diff =
 		controlFileNotice(files) +
@@ -154,7 +154,9 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 
 export function controlFileNotice(files: string[]): string {
 	const controls = files.filter((file) => /(^|\/)\.(gitattributes|gitmodules)$/.test(file));
-	return controls.length ? `Repository control files changed: ${controls.join(", ")}\n` : "";
+	return controls.length
+		? `Repository control files changed: ${controls.map((file) => escapeDiffText(JSON.stringify(file))).join(", ")}\n`
+		: "";
 }
 
 /** Escape unsafe characters without dropping any source line. */

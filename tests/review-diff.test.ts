@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { workspaceDiff } from "../src/orchestration/worktrees.ts";
@@ -7,6 +7,24 @@ import { diffTool } from "../src/orchestration/tools.ts";
 import { taskContext } from "../src/orchestration/context.ts";
 import { taskPrompt } from "../src/orchestration/runner.ts";
 import { reviewedProject } from "./fixtures/review-project.ts";
+
+test("non-ASCII control-file paths are unquoted in notices and reviewer file lists", async () => {
+	const host = await reviewedProject((task) => {
+		mkdirSync(join(task.workspace.path, "é"));
+		writeFileSync(join(task.workspace.path, "é/.gitattributes"), "* -diff\n");
+		writeFileSync(join(task.workspace.path, "é/.gitmodules"), "# fixture\n");
+	});
+	try {
+		assert.deepEqual(host.builder.result!.files, ["é/.gitattributes", "é/.gitmodules"]);
+		const diff = workspaceDiff(host.builder.workspace);
+		assert.deepEqual(diff.files, ["é/.gitattributes", "é/.gitmodules"]);
+		assert.match(diff.diff.split("\n")[0], /é\/\.gitattributes.*é\/\.gitmodules/);
+		const review = host.completed.find((task) => task.reviewOf === host.builder.id)!;
+		assert.match(taskPrompt(review), /é\/\.gitattributes.*é\/\.gitmodules/);
+	} finally {
+		await host.close();
+	}
+});
 
 test("attributes cannot hide text changes from artifacts, reviewer tools or integration previews", async () => {
 	const host = await reviewedProject((task) => {
