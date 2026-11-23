@@ -48,60 +48,74 @@ async function host(pkg: string, extraExtensions: string[] = []) {
 		noContextFiles: true,
 		additionalExtensionPaths: extraExtensions,
 	});
-	await loader.reload();
-	const runtime = await ModelRuntime.create({
-		authPath: join(profile, "auth.json"),
-		modelsPath: null,
-		allowModelNetwork: false,
-		refreshOnCreate: false,
-	});
-	const sessions = SessionManager.create(project, join(profile, "sessions"));
 	const previous = process.env.PI_POLY_PROFILE;
-	process.env.PI_POLY_PROFILE = profile;
-	const { session } = await createAgentSession({
-		cwd: project,
-		agentDir: profile,
-		resourceLoader: loader,
-		modelRuntime: runtime,
-		sessionManager: sessions,
-		settingsManager: settings,
-		tools: ["hello", "todo"],
-	});
-	const notices: string[] = [],
-		statuses = new Map<string, string>();
-	const theme = loadThemeFromPath(
-		resolve("node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/dark.json"),
-	);
-	await session.bindExtensions({
-		uiContext: {
-			...session.extensionRunner.getUIContext(),
-			theme,
-			confirm: async () => true,
-			notify: (s: string) => notices.push(s),
-			setStatus: (k: string, s: string | undefined) => {
-				if (s) statuses.set(k, s);
-			},
-		},
-		mode: "tui",
-	});
-	return {
-		root,
-		project,
-		profile,
-		packages,
-		loader,
-		session,
-		sessions,
-		runtime,
-		notices,
-		statuses,
-		theme,
-		close: () => {
-			session.dispose();
-			if (previous === undefined) delete process.env.PI_POLY_PROFILE;
-			else process.env.PI_POLY_PROFILE = previous;
-		},
+	const restoreProfile = () => {
+		if (previous === undefined) delete process.env.PI_POLY_PROFILE;
+		else process.env.PI_POLY_PROFILE = previous;
 	};
+	process.env.PI_POLY_PROFILE = profile;
+	let loaded = false;
+	try {
+		await loader.reload();
+		const runtime = await ModelRuntime.create({
+			authPath: join(profile, "auth.json"),
+			modelsPath: null,
+			allowModelNetwork: false,
+			refreshOnCreate: false,
+		});
+		const sessions = SessionManager.create(project, join(profile, "sessions"));
+		const { session } = await createAgentSession({
+			cwd: project,
+			agentDir: profile,
+			resourceLoader: loader,
+			modelRuntime: runtime,
+			sessionManager: sessions,
+			settingsManager: settings,
+			tools: ["hello", "todo"],
+		});
+		const notices: string[] = [],
+			statuses = new Map<string, string>();
+		const theme = loadThemeFromPath(
+			resolve(
+				"node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/dark.json",
+			),
+		);
+		await session.bindExtensions({
+			uiContext: {
+				...session.extensionRunner.getUIContext(),
+				theme,
+				confirm: async () => true,
+				notify: (s: string) => notices.push(s),
+				setStatus: (k: string, s: string | undefined) => {
+					if (s) statuses.set(k, s);
+				},
+			},
+			mode: "tui",
+		});
+		loaded = true;
+		return {
+			root,
+			project,
+			profile,
+			packages,
+			loader,
+			session,
+			sessions,
+			runtime,
+			notices,
+			statuses,
+			theme,
+			close: () => {
+				try {
+					session.dispose();
+				} finally {
+					restoreProfile();
+				}
+			},
+		};
+	} finally {
+		if (!loaded) restoreProfile();
+	}
 }
 
 test("unmodified Pi 1.5.2 session, todo, status and dynamic resources coexist with Poly commands", async () => {

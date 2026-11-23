@@ -9,6 +9,7 @@ process.env.HOME = root;
 process.env.USERPROFILE = root;
 process.env.XDG_CONFIG_HOME = join(root, "config");
 process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+process.env.PI_POLY_PROFILE = join(root, "poly-agent");
 process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
 process.env.MEMPALACE_CONFIG_DIR = join(root, "memory-unavailable");
 process.env.PI_OFFLINE = "1";
