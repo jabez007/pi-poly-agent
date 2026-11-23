@@ -37,7 +37,7 @@ export function registerOrchestration(
 	let stopped = false;
 	let generation = 0;
 	const published = new Set<string>();
-	const preparations = new Set<AbortController>();
+	const preparations = new Map<string, AbortController>();
 	const config = () => loadPlatform(profile, current?.cwd);
 	async function chooseTask(ctx: ExtensionContext, id?: string): Promise<Task | undefined> {
 		const all = tasks(ctx).list().reverse();
@@ -155,12 +155,13 @@ export function registerOrchestration(
 		if (approved) importNodeDependencies(task.workspace);
 	}
 	async function prepareExisting(ctx: ExtensionContext, task: Task, command = ""): Promise<void> {
-		if (!ctx.hasUI || ctx.mode !== "tui" || task.status === "running")
+		if (!ctx.hasUI || ctx.mode !== "tui")
 			throw new Error("Preparation requires an inactive task and interactive approval");
+		assertTaskIdle(task);
 		assertPreparation(task, command, config().policy);
 		if (command) {
 			const controller = new AbortController();
-			preparations.add(controller);
+			preparations.set(task.id, controller);
 			try {
 				const details = await approvedTest(
 					command,
@@ -177,7 +178,7 @@ export function registerOrchestration(
 				tasks(ctx).recordPreparation(task.id, command, details.exitCode);
 				ctx.ui.notify(`Preparation exit ${details.exitCode}\n${details.output}`, "info");
 			} finally {
-				preparations.delete(controller);
+				preparations.delete(task.id);
 			}
 			return;
 		}
@@ -195,6 +196,18 @@ export function registerOrchestration(
 		)
 			importNodeDependencies(task.workspace);
 	}
+	function assertTaskIdle(task: Task): void {
+		if (task.status === "running")
+			throw new Error("Cancel the running task before inspecting diffs or cleanup");
+		if (preparations.has(task.id))
+			throw new Error(
+				"Task preparation is active; wait for preparation before inspecting diffs or cleanup",
+			);
+	}
+	function inspectTaskDiff(task: Task): string {
+		assertTaskIdle(task);
+		return workspaceDiff(task.workspace).diff || "No source diff.";
+	}
 	async function recoverTask(ctx: ExtensionContext, task: Task): Promise<void> {
 		ctx.ui.notify(formatTask(task), "info");
 		const choice = await modelChoice(ctx, task.role);
@@ -209,8 +222,7 @@ export function registerOrchestration(
 			actions.unshift("Recover with a new worker");
 		if (task.status === "running") actions.unshift("Cancel worker");
 		const choice = await ctx.ui.select("Task actions", actions);
-		if (choice === "Inspect diff")
-			ctx.ui.notify(workspaceDiff(task.workspace).diff || "No source diff.", "info");
+		if (choice === "Inspect diff") ctx.ui.notify(inspectTaskDiff(task), "info");
 		if (choice === "Recover with a new worker") await recoverTask(ctx, task);
 		if (choice === "Cancel worker") await manager!.cancel(task.id);
 		if (choice === "Inspect review and integrate") await integrateTask(ctx, task, manager!);
@@ -572,7 +584,7 @@ export function registerOrchestration(
 				return;
 			}
 			if (action === "diff") {
-				ctx.ui.notify(workspaceDiff(task.workspace).diff || "No source diff.", "info");
+				ctx.ui.notify(inspectTaskDiff(task), "info");
 				return;
 			}
 			if (action === "integrate") {
@@ -592,7 +604,7 @@ export function registerOrchestration(
 				return;
 			}
 			if (action === "cleanup") {
-				await cleanupTask(ctx, task);
+				await cleanupTask(ctx, task, () => assertTaskIdle(list.get(task.id)));
 				return;
 			}
 			ctx.ui.notify(formatTask(task), "info");
@@ -656,7 +668,7 @@ export function registerOrchestration(
 	});
 	pi.on("session_before_switch", async () => {
 		generation++;
-		for (const controller of preparations) controller.abort();
+		for (const controller of preparations.values()) controller.abort();
 		await workflows?.close();
 		workflows = undefined;
 		if (manager) {
@@ -668,7 +680,7 @@ export function registerOrchestration(
 	});
 	pi.on("session_shutdown", async () => {
 		generation++;
-		for (const controller of preparations) controller.abort();
+		for (const controller of preparations.values()) controller.abort();
 		stopped = true;
 		await workflows?.close();
 		await manager?.close();
@@ -759,8 +771,12 @@ function assertPreparation(
 		throw new Error("Preparation command requires effective read, write and test permissions");
 }
 
-async function cleanupTask(ctx: ExtensionContext, task: Task): Promise<void> {
-	if (task.status === "running") throw new Error("Cancel the task before cleanup");
+async function cleanupTask(
+	ctx: ExtensionContext,
+	task: Task,
+	assertIdle: () => void,
+): Promise<void> {
+	assertIdle();
 	if (
 		ctx.hasUI &&
 		ctx.mode === "tui" &&
@@ -768,8 +784,10 @@ async function cleanupTask(ctx: ExtensionContext, task: Task): Promise<void> {
 			"Remove this clean task worktree?",
 			`${task.workspace.path}\nThe branch and snapshot commits are retained.`,
 		))
-	)
+	) {
+		assertIdle();
 		cleanupWorkspace(task.workspace);
+	}
 }
 
 function launchDescription(
