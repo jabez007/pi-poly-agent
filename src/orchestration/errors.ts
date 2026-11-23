@@ -37,6 +37,27 @@ export class WorkerFailure extends Error {
 		super(`[${code}] ${MESSAGES[code]}`);
 	}
 }
+/** Only locally calculated numeric metadata is eligible for detailed budget diagnostics. */
+export class ReviewBudgetError extends WorkerFailure {
+	constructor(
+		readonly required: number,
+		readonly budget: number,
+		readonly scope: "view" | "packet" = "view",
+	) {
+		super("context");
+		if (
+			!Number.isSafeInteger(required) ||
+			!Number.isSafeInteger(budget) ||
+			required < 0 ||
+			budget < 0
+		)
+			throw new Error("Invalid review budget metadata");
+		this.message =
+			scope === "packet"
+				? `Review packet requires at least ${required} characters for its required view; configured context budget is ${budget}. View allocation is capped at 6000 after context reserves. Increase a smaller budget, shorten paths or inspect manually.`
+				: `Review view needs ${required} characters of metadata; budget is ${budget}. Increase a smaller budget, shorten paths or inspect the task manually.`;
+	}
+}
 /** Classify locally, then discard the raw provider body. Never persist or display it. */
 export function classifyFailure(error: unknown): FailureCode {
 	if (error instanceof WorkerFailure) return error.code;
@@ -68,6 +89,8 @@ export function classifyFailure(error: unknown): FailureCode {
 	return "unknown";
 }
 export function safeFailure(error: unknown): WorkerFailure {
+	if (error instanceof ReviewBudgetError)
+		return new ReviewBudgetError(error.required, error.budget, error.scope);
 	return new WorkerFailure(classifyFailure(error));
 }
 

@@ -15,7 +15,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assertEnvironment, type Policy } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
-import { REVIEW_CONTEXT_BUDGET, reviewDiffView } from "./review-view.ts";
+import { reviewDiffView } from "./review-view.ts";
+import { reviewContextView } from "./context.ts";
 import { assertSafeProfile } from "../profile.ts";
 import type { Role } from "./roles.ts";
 import {
@@ -611,17 +612,11 @@ function reviewContext(input: Dispatch, review?: Task): string {
 	const context = input.context || "";
 	if (!review?.revision) return context;
 	const limit = input.policy?.contextBudget ?? 16000;
-	const view = reviewDiffView(
-		review.workspace.path,
-		review.workspace.base,
-		review.revision,
-		[],
-		Math.min(limit, REVIEW_CONTEXT_BUDGET),
-	);
+	const view = reviewContextView(review, limit);
 	if (!view) return context;
 	if (!context.includes(view))
 		throw new Error(
-			"Approved context is missing the required review view; reopen the context editor and retain it unchanged",
+			"Approved context is missing the required review view. It fits this budget but was omitted or changed before dispatch; reopen the context editor and retain it unchanged.",
 		);
 	if (context.split(view).length !== 2)
 		throw new Error(

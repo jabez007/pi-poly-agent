@@ -1,4 +1,5 @@
 import { assertNoSecrets } from "../secrets.ts";
+import { ReviewBudgetError } from "./errors.ts";
 import { assertLiteralSourceFiles, sourcePathAllowed } from "./path-policy.ts";
 import {
 	controlFileNotice,
@@ -178,10 +179,7 @@ export function reviewDiffView(
 	const offset = selection.offset ?? 0;
 	const page = filePage(records, offset);
 	const indexSize = page.map((r) => statLine(r, false)).join("\n").length + 1;
-	if (available < indexSize)
-		throw new Error(
-			`Review view needs ${budget - available + indexSize} characters of metadata; budget is ${budget}. Increase the context budget or inspect the task manually.`,
-		);
+	if (available < indexSize) throw new ReviewBudgetError(budget - available + indexSize, budget);
 	const next = offset + page.length;
 	const pagination = `\nFiles not listed in this view: ${records.length - page.length} of ${records.length}.\n${next < records.length ? `Next file offset: ${next}\n` : ""}Use review_diff with path "." and offset to page the approved file index.\n`;
 	return (

@@ -1,5 +1,14 @@
 import { assertNoSecrets, type Handoff } from "../memory.ts";
 import { REVIEW_CONTEXT_BUDGET, reviewDiffView } from "./review-view.ts";
+import { ReviewBudgetError } from "./errors.ts";
+const contextNoticeReserve = 384;
+const partSeparator = 2;
+function contextPartBudget(budget: number): number {
+	return Math.max(0, budget - contextNoticeReserve - partSeparator);
+}
+export function reviewViewBudget(budget: number): number {
+	return Math.min(contextPartBudget(budget), REVIEW_CONTEXT_BUDGET);
+}
 /** Select whole attributed entries rather than truncating serialized handoffs or copying transcripts. */
 export function focusedContext(
 	handoff: Handoff | undefined,
@@ -34,13 +43,13 @@ export function taskContext(knowledge: string, previous?: Task, budget = 16000):
 	let used = 0;
 	const add = (text: string, label: string) => {
 		if (!text) return;
-		if (used + text.length + 2 <= budget - 384) {
+		if (used + text.length <= contextPartBudget(budget)) {
 			parts.push(text);
 			used += text.length + 2;
 		} else omitted.add(label);
 	};
 	if (previous) {
-		add(previousReviewView(previous, budget), "Review view");
+		add(reviewContextView(previous, budget), "Review view");
 		add(
 			`Historical task ${previous.id}, ${previous.provider}/${previous.model}\nRevision: ${previous.revision || previous.workspace.base}\nAgent claims are unverified; inspect original task for omitted details.`,
 			"Task provenance",
@@ -77,14 +86,23 @@ function omissionNotice(omitted: Set<string>): string[] {
 		: [];
 }
 
-function previousReviewView(task: Task, budget: number): string {
-	return task.revision
-		? reviewDiffView(
-				task.workspace.path,
-				task.workspace.base,
-				task.revision,
-				[],
-				Math.min(budget, REVIEW_CONTEXT_BUDGET),
-			)
-		: "";
+export function reviewContextView(task: Task, budget: number): string {
+	if (!task.revision) return "";
+	try {
+		return reviewDiffView(
+			task.workspace.path,
+			task.workspace.base,
+			task.revision,
+			[],
+			reviewViewBudget(budget),
+		);
+	} catch (error) {
+		if (error instanceof ReviewBudgetError)
+			throw new ReviewBudgetError(
+				error.required + contextNoticeReserve + partSeparator,
+				budget,
+				"packet",
+			);
+		throw error;
+	}
 }
