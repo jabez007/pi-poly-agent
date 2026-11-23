@@ -247,14 +247,20 @@ export function controlFileNotice(files: string[]): string {
 
 /** Escape unsafe characters without dropping any source line. */
 export function escapeDiffText(text: string): string {
-	return text.replace(/[\\\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, (character) =>
-		character === "\n" ? "\n" : `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	return text.replace(
+		/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u180e\u3164\u{e0000}-\u{e007f}]/gu,
+		(character) => {
+			if (character === "\n") return "\n";
+			const point = character.codePointAt(0)!;
+			const hex = point.toString(16).padStart(4, "0");
+			return point > 0xffff ? `\\u{${hex}}` : `\\u${hex}`;
+		},
 	);
 }
 export function renderReviewDiff(diff: string): string {
 	assertNoSecrets(diff);
 	return (
-		"Review diff: controls, bidirectional characters and backslashes use visible Unicode escapes.\n" +
+		"Review diff: controls, bidirectional and other invisible characters and backslashes use visible Unicode escapes.\n" +
 		escapeDiffText(diff)
 	);
 }
