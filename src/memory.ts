@@ -5,7 +5,7 @@ import {
 	renderMemory,
 } from "./memory-context.ts";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { git as hostGit } from "./orchestration/worktrees.ts";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -104,15 +104,7 @@ function validateFacts(facts: Handoff["facts"]): void {
 
 function git(cwd: string, args: string[]): string {
 	try {
-		const env = Object.fromEntries(
-			Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
-		);
-		return execFileSync("git", args, {
-			cwd,
-			env,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-		}).trim();
+		return hostGit(cwd, args);
 	} catch {
 		return "unknown";
 	}

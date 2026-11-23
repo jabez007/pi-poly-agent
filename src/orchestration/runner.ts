@@ -6,6 +6,7 @@ import type { WorkerResources } from "../platform/contracts.ts";
 export { nativeWorkerProvider } from "../platform/providers.ts";
 import { safeFailure, WorkerFailure } from "./errors.ts";
 import { untilCanceled } from "./cancellation.ts";
+import { pinWorkspace } from "./worktrees.ts";
 import { protectedWorkerProvider } from "./stream.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -49,6 +50,7 @@ export function createPiRunner(
 ): TaskRunner {
 	return async ({ task, signal, progress, session: recordSession }) => {
 		assertEnvironment(process.env);
+		pinWorkspace(task.workspace);
 		validateRequestBudget(task.requestBudget);
 		const policy = loadPolicy(profile);
 		registry.assert(task.provider, task.depth);

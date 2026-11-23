@@ -24,6 +24,7 @@ import {
 	inspectWorkspace,
 	integrateWorkspace,
 	assertIntegration,
+	pinWorkspace,
 	git,
 	type Workspace,
 } from "./worktrees.ts";
@@ -232,6 +233,7 @@ export class TaskManager {
 			throw new Error("Task belongs to another project or path");
 		assertSafeProfile(task.workspace.path);
 		assertNoSecrets(task);
+		pinWorkspace(task.workspace);
 		if (["running", "created"].includes(task.status)) {
 			task.status = "interrupted";
 			task.error =

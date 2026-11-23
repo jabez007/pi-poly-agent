@@ -1,21 +1,32 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafeProfile } from "../profile.ts";
 
+const pinnedWorkspaces = new Map<string, Workspace>();
+
 export function git(cwd: string, args: string[]): string {
+	const workspace = [...pinnedWorkspaces.values()].find((w) => {
+		const path = relative(w.path, resolve(cwd));
+		return !path || (!path.startsWith("..") && !isAbsolute(path));
+	});
+	const location = workspace ? workspaceLocation(workspace) : [];
 	const env = Object.fromEntries(
 		Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
 	);
 	try {
-		return execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
-			cwd,
-			env,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-			maxBuffer: 2 * 1024 * 1024,
-			timeout: 15000,
-		}).trim();
+		return execFileSync(
+			"git",
+			["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...location, ...args],
+			{
+				cwd,
+				env,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				maxBuffer: 2 * 1024 * 1024,
+				timeout: 15000,
+			},
+		).trim();
 	} catch {
 		throw new Error("Git operation failed; diagnostics withheld");
 	}
@@ -26,6 +37,39 @@ export interface Workspace {
 	base: string;
 	root: string;
 	parentBranch?: string;
+	gitDir?: string;
+}
+
+/** Derive task metadata from the parent repository, including for legacy task records. */
+export function pinWorkspace(workspace: Workspace): void {
+	const common = git(workspace.root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+	const directory = join(common, "worktrees");
+	assertSafeProfile(directory);
+	const matches = readdirSync(directory, { withFileTypes: true }).filter((entry) => {
+		if (!entry.isDirectory()) return false;
+		const file = join(directory, entry.name, "gitdir");
+		assertSafeProfile(file);
+		return readFileSync(file, "utf8").trim() === join(workspace.path, ".git");
+	});
+	if (matches.length !== 1) throw new Error("Worktree metadata unavailable; inspect manually");
+	const gitDir = realpathSync(join(directory, matches[0].name));
+	if (workspace.gitDir && workspace.gitDir !== gitDir)
+		throw new Error("Worktree metadata changed; inspect manually");
+	workspace.gitDir = gitDir;
+	pinnedWorkspaces.set(resolve(workspace.path), { ...workspace });
+}
+
+function workspaceLocation(workspace: Workspace): string[] {
+	try {
+		const file = join(workspace.path, ".git");
+		if (!lstatSync(file).isFile()) throw new Error();
+		const match = /^gitdir: (.+)\n?$/.exec(readFileSync(file, "utf8"));
+		if (!match || realpathSync(resolve(workspace.path, match[1])) !== workspace.gitDir)
+			throw new Error();
+		return [`--git-dir=${workspace.gitDir}`, `--work-tree=${workspace.path}`];
+	} catch {
+		throw new Error("Worktree Git metadata changed or unavailable; inspect the worktree manually");
+	}
 }
 export function createWorkspace(
 	cwd: string,
@@ -50,12 +94,15 @@ export function createWorkspace(
 	const branch = `poly/task-${id}`;
 	beforeCreate({ root, path, branch, base, parentBranch });
 	git(root, ["worktree", "add", "-b", branch, path, base]);
-	return { root, path: realpathSync(path), branch, base, parentBranch };
+	const workspace = { root, path: realpathSync(path), branch, base, parentBranch };
+	pinWorkspace(workspace);
+	return workspace;
 }
 export function workspaceDiff(workspace: Workspace): { files: string[]; diff: string } {
 	assertSafeProfile(workspace.path);
 	if (!existsSync(workspace.path))
 		throw new Error("Task worktree missing; inspect its retained branch manually");
+	pinWorkspace(workspace);
 	// Include untracked source in the review snapshot, without committing or staging it in the user's tree.
 	git(workspace.path, ["add", "-N", "--", "."]);
 	const files = git(workspace.path, ["diff", "--name-only", workspace.base])
@@ -65,6 +112,7 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 	return { files, diff };
 }
 export function snapshotWorkspace(workspace: Workspace): string {
+	pinWorkspace(workspace);
 	if (git(workspace.path, ["branch", "--show-current"]) !== workspace.branch)
 		throw new Error("Task branch changed; snapshot refused");
 	git(workspace.path, ["add", "--all"]);
@@ -92,6 +140,7 @@ export function cleanupWorkspace(workspace: Workspace): void {
 	assertSafeProfile(workspace.path);
 	if (!existsSync(workspace.path))
 		throw new Error("Task worktree is missing; inspect its retained branch with Git worktree list");
+	pinWorkspace(workspace);
 	if (git(workspace.path, ["status", "--porcelain"]))
 		throw new Error("Worktree has changes; cleanup refused");
 	git(workspace.root, ["worktree", "remove", workspace.path]);
@@ -100,6 +149,8 @@ export function cleanupWorkspace(workspace: Workspace): void {
 export function assertIntegration(workspace: Workspace, revision: string): void {
 	if (!existsSync(workspace.path))
 		throw new Error("Task worktree missing; inspect its retained branch");
+	pinWorkspace(workspace);
+	workspaceLocation(workspace);
 	const branch = git(workspace.root, ["branch", "--show-current"]);
 	if (!branch)
 		throw new Error("Parent HEAD is detached; switch to the original branch before integration");
@@ -125,6 +176,7 @@ export function inspectWorkspace(workspace: Workspace): string[] {
 			"Worktree directory is missing. Inspect its retained task branch with Git or Lazygit; no automatic recreation attempted.",
 		];
 	try {
+		pinWorkspace(workspace);
 		const notes = [
 			git(workspace.path, ["status", "--porcelain"])
 				? "Uncommitted changes preserved. Inspect the diff before recovery or cleanup."
@@ -134,6 +186,8 @@ export function inspectWorkspace(workspace: Workspace): string[] {
 			notes.push("Task branch changed; inspect manually before recovery.");
 		return notes;
 	} catch {
-		return ["Worktree Git metadata unavailable. Files retained for manual recovery."];
+		return [
+			"Worktree Git metadata changed or unavailable. Inspect the worktree manually; files retained.",
+		];
 	}
 }

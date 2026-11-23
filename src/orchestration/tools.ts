@@ -86,6 +86,8 @@ export async function sandboxedTest(
 		if (existsSync(path)) args.push("--ro-bind", path, path);
 	if (existsSync("/etc/ld.so.cache"))
 		args.push("--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache");
+	const metadata = resolve(cwd, ".git");
+	const gitMount = existsSync(metadata) ? ["--ro-bind", metadata, "/workspace/.git"] : [];
 	args.push(
 		"--ro-bind",
 		dirname(process.execPath),
@@ -93,6 +95,7 @@ export async function sandboxedTest(
 		"--bind",
 		cwd,
 		"/workspace",
+		...gitMount,
 		"--chdir",
 		"/workspace",
 		"--clearenv",
