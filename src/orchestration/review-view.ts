@@ -1,3 +1,4 @@
+import { reviewPatches } from "./review-patches.ts";
 import { assertNoSecrets } from "../secrets.ts";
 import { ReviewBudgetError } from "./errors.ts";
 import { assertLiteralSourceFiles, sourcePathAllowed } from "./path-policy.ts";
@@ -8,7 +9,7 @@ import {
 	readGitOutput,
 	renderReviewDiff,
 	reviewDiffOptions,
-	scanGitOutput,
+	withCheckedGitRead,
 } from "./worktrees.ts";
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -38,33 +39,6 @@ export function reviewFileIndex(cwd: string, options: string[]): FileStat[] {
 	});
 	assertNoSecrets(records);
 	return records;
-}
-
-function filePatch(
-	cwd: string,
-	base: string,
-	revision: string,
-	file: string,
-	budget: number,
-): string | undefined {
-	let raw = "",
-		fits = true;
-	readGitOutput(
-		cwd,
-		["--literal-pathspecs", "diff", ...diffArguments(base, revision, [file])],
-		(chunk) => {
-			if (raw.length + chunk.length > budget) {
-				fits = false;
-				return false;
-			}
-			raw += chunk;
-		},
-		Math.min(65536, Math.max(1, budget + 1)),
-	);
-	if (!fits) return;
-	if ((raw.match(/(?:^|\n)diff --git /g) || []).length !== 1) return;
-	const rendered = escapeDiffText(raw);
-	return rendered.length <= budget ? rendered : undefined;
 }
 
 function inspectionCommands(
@@ -99,7 +73,6 @@ function selectedRecords(cwd: string, options: string[], selection: ViewSelectio
 			records.map((r) => r.file),
 			selection.exactPath,
 		);
-	if (!selection.indexOnly) scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
 	return records;
 }
 function controlNotice(records: FileStat[]): string {
@@ -135,29 +108,12 @@ function statLine(record: FileStat, shown: boolean): string {
 		: "refused by path policy";
 	return `[${state}] ${escapeDiffText(JSON.stringify(record.file))} ${lineCounts(record)}`;
 }
-function pageContent(
-	cwd: string,
-	base: string,
-	revision: string,
-	page: FileStat[],
-	budget: number,
-	indexOnly: boolean,
-): string {
-	const patches: string[] = [],
-		index: string[] = [];
-	let remaining = budget - page.map((r) => statLine(r, false)).join("\n").length - 1;
-	for (const record of page) {
-		const patch =
-			!indexOnly && remaining > 0 && sourcePathAllowed(record.file)
-				? filePatch(cwd, base, revision, record.file, remaining)
-				: undefined;
-		index.push(statLine(record, patch !== undefined));
-		if (patch !== undefined) {
-			patches.push(patch);
-			remaining -= patch.length;
-		}
-	}
-	return index.join("\n") + "\n" + patches.join("");
+function pageContent(page: FileStat[], patches: Map<string, string>): string {
+	return (
+		page.map((record) => statLine(record, patches.has(record.file))).join("\n") +
+		"\n" +
+		[...patches.values()].join("")
+	);
 }
 
 /** Both the file index and patches are bounded; the existing review tool can page the index. */
@@ -168,6 +124,16 @@ export function reviewDiffView(
 	paths: string[] = [],
 	budget = 48000,
 	selection: ViewSelection = {},
+): string {
+	return withCheckedGitRead(cwd, () => buildView(cwd, base, revision, paths, budget, selection));
+}
+function buildView(
+	cwd: string,
+	base: string,
+	revision: string,
+	paths: string[],
+	budget: number,
+	selection: ViewSelection,
 ): string {
 	const options = diffArguments(base, revision, paths);
 	const records = selectedRecords(cwd, options, selection);
@@ -182,10 +148,13 @@ export function reviewDiffView(
 	if (available < indexSize) throw new ReviewBudgetError(budget - available + indexSize, budget);
 	const next = offset + page.length;
 	const pagination = `\nFiles not listed in this view: ${records.length - page.length} of ${records.length}.\n${next < records.length ? `Next file offset: ${next}\n` : ""}Use review_diff with path "." and offset to page the approved file index.\n`;
-	return (
-		header +
-		pageContent(cwd, base, revision, page, available, !!selection.indexOnly) +
-		pagination +
-		footer
+	const patchBudget = available - indexSize;
+	const patches = reviewPatches(
+		cwd,
+		["--literal-pathspecs", "diff", ...options],
+		records.map((r) => r.file),
+		selection.indexOnly ? [] : page.map((r) => r.file),
+		patchBudget,
 	);
+	return header + pageContent(page, patches) + pagination + footer;
 }

@@ -21,7 +21,7 @@ import { assertSafeProfile } from "../profile.ts";
 import type { Role } from "./roles.ts";
 import {
 	createWorkspace,
-	workspaceDiff,
+	screenWorkspace,
 	snapshotWorkspace,
 	inspectWorkspace,
 	integrateWorkspace,
@@ -486,14 +486,14 @@ export class TaskManager {
 	private complete(task: Task, result: TaskResult): void {
 		task.result = validateTaskResult(result);
 		this.persist(task, false);
-		const changes = workspaceDiff(task.workspace);
-		assertNoSecrets(changes);
-		if (!task.role.editing && changes.files.length)
-			throw new Error("Read-only worker modified files");
-		task.result.files = changes.files;
+		const files = screenWorkspace(task.workspace);
+		assertNoSecrets(files);
+		if (!task.role.editing && files.length) throw new Error("Read-only worker modified files");
+		task.result.files = files;
 		if (task.role.editing) task.revision = snapshotWorkspace(task.workspace);
-		if (task.revision)
-			changes.diff = reviewDiffView(task.workspace.path, task.workspace.base, task.revision);
+		const diff = task.revision
+			? reviewDiffView(task.workspace.path, task.workspace.base, task.revision)
+			: "";
 		task.artifacts = [
 			...(task.result.artifacts || []),
 			{ kind: "summary", content: task.result.summary, source: task.id, certainty: "claim" },
@@ -511,7 +511,7 @@ export class TaskManager {
 			},
 			{
 				kind: "diff",
-				content: changes.diff,
+				content: diff,
 				source: task.revision || task.workspace.base,
 				certainty: "observed",
 			},
@@ -569,7 +569,7 @@ export class TaskManager {
 			throw new Error("Original worktree is missing; inspect its retained branch manually");
 		if (git(previous.workspace.root, ["rev-parse", "HEAD"]) !== previous.workspace.base)
 			throw new Error("Parent changed; recover the original task branch manually");
-		assertNoSecrets(workspaceDiff(previous.workspace));
+		assertNoSecrets(screenWorkspace(previous.workspace));
 		return previous;
 	}
 	integrate(id: string): Task {

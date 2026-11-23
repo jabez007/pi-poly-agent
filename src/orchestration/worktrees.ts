@@ -23,6 +23,45 @@ import { gitMetadataName } from "./path-policy.ts";
 const pinnedWorkspaces = new Map<string, Workspace>();
 const taskDirectories = new Set<string>();
 const metadataBufferLimit = 2 * 1024 * 1024;
+const checkedReads = new Map<string, ReturnType<typeof freshGitInvocation>>();
+
+function readonlyQuery(args: string[]): boolean {
+	const command = args[0] === "--literal-pathspecs" ? 1 : 0;
+	const rest = args.slice(command + 1);
+	if (args[command] === "rev-parse")
+		return (
+			rest.length === 1 && ["HEAD", "--git-common-dir", "--absolute-git-dir"].includes(rest[0])
+		);
+	if (args[command] === "status") return rest.length === 1 && rest[0] === "--porcelain";
+	if (args[command] !== "diff") return false;
+	const end = rest.indexOf("--");
+	return rest
+		.slice(0, end < 0 ? rest.length : end)
+		.every(
+			(arg) =>
+				[...reviewDiffOptions, "--numstat", "-z", "--ignore-submodules=all"].includes(arg) ||
+				/^[a-f0-9]{40,64}$/.test(arg),
+		);
+}
+
+function synchronousRead<T>(operation: () => T): T {
+	const result = operation();
+	if (result && typeof (result as any).then === "function")
+		throw new Error("Checked Git read scopes must stay synchronous");
+	return result;
+}
+
+/** Internal scope for one synchronous, read-only view or source inspection. */
+export function withCheckedGitRead<T>(cwd: string, operation: () => T): T {
+	const key = resolve(cwd);
+	if (checkedReads.has(key)) return synchronousRead(operation);
+	checkedReads.set(key, freshGitInvocation(cwd, []));
+	try {
+		return synchronousRead(operation);
+	} finally {
+		checkedReads.delete(key);
+	}
+}
 
 /** Internal registration from the task controller; never inferred from task-owned files. */
 export function registerTaskDirectory(directory: string): void {
@@ -34,6 +73,18 @@ function containsPath(root: string, target: string): boolean {
 }
 
 function gitInvocation(cwd: string, args: string[]) {
+	const key = resolve(cwd),
+		checked = checkedReads.get(key);
+	if (checked && readonlyQuery(args)) {
+		// Worker tools are sequential and these scopes are synchronous and query-only. The UI also
+		// excludes active preparation writers. No owned writer can change this worktree mid-view.
+		// This is not protection against unrelated host processes. Other Git commands invalidate it.
+		return { ...checked, args: [...checked.args, ...submoduleSafeArgs(args, true)] };
+	}
+	checkedReads.delete(key);
+	return freshGitInvocation(cwd, args);
+}
+function freshGitInvocation(cwd: string, args: string[]) {
 	const workspace = [...pinnedWorkspaces.values()].find((w) => containsPath(w.path, cwd));
 	if (!workspace && [...taskDirectories].some((directory) => containsPath(directory, cwd)))
 		throw new Error("Unregistered task worktree has no pinned workspace; inspect manually");
@@ -212,21 +263,36 @@ export function createWorkspace(
 	pinWorkspace(workspace);
 	return workspace;
 }
-export function workspaceDiff(workspace: Workspace): { files: string[]; diff: string } {
+function prepareWorkspace(workspace: Workspace): void {
 	assertSafeProfile(workspace.path);
 	if (!existsSync(workspace.path))
 		throw new Error("Task worktree missing; inspect its retained branch manually");
 	pinWorkspace(workspace);
 	// Include untracked source in the review snapshot, without committing or staging it in the user's tree.
 	git(workspace.path, ["add", "-N", "--", "."]);
-	const files = reviewFileIndex(workspace.path, [...reviewDiffOptions, workspace.base]).map(
+}
+function workspaceFiles(workspace: Workspace): string[] {
+	return reviewFileIndex(workspace.path, [...reviewDiffOptions, workspace.base]).map(
 		(record) => record.file,
 	);
-	const revision = workspaceChanged(workspace.path)
-		? ""
-		: git(workspace.path, ["rev-parse", "HEAD"]);
-	const diff = reviewDiffView(workspace.path, workspace.base, revision);
-	return { files, diff };
+}
+export function screenWorkspace(workspace: Workspace): string[] {
+	prepareWorkspace(workspace);
+	return withCheckedGitRead(workspace.path, () => {
+		const files = workspaceFiles(workspace);
+		scanGitOutput(workspace.path, ["diff", ...reviewDiffOptions, workspace.base]);
+		return files;
+	});
+}
+export function workspaceDiff(workspace: Workspace): { files: string[]; diff: string } {
+	prepareWorkspace(workspace);
+	return withCheckedGitRead(workspace.path, () => {
+		const files = workspaceFiles(workspace);
+		const revision = workspaceChanged(workspace.path)
+			? ""
+			: git(workspace.path, ["rev-parse", "HEAD"]);
+		return { files, diff: reviewDiffView(workspace.path, workspace.base, revision) };
+	});
 }
 
 function workspaceChanged(cwd: string): boolean {
