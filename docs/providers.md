@@ -88,7 +88,7 @@ No provider/model fallback is selected when child initialization, authentication
 
 `/poly-qualify PROVIDER/MODEL` offers a separately approved, tool-free worker probe for an eligible instance. It shows the exact identity, authentication and billing mode. The probe has one generation, a requested 512-token output cap and a 30-second timeout. No tools, edits, automatic retry or provider substitution are allowed. Provider enforcement of output limits is not a monetary guarantee. This verifies only the observed request, not all provider capabilities. It is never run by installation, doctor or CI.
 
-`npm run qualify -- PROVIDER` prints a manual plan for `openai-codex`, `kimi-coding`, or `zai`. It performs no credential resolution, login, model request, or live test. Follow [qualification procedures](qualification.md) only after reviewing and choosing the operations yourself.
+`npm run qualify -- PROVIDER` prints a manual plan for `openai-codex`, `kimi-coding`, `zai`, or an explicitly configured custom instance. It performs no credential resolution, login, model request, or live test. See [the planner](../src/orchestration/qualification.ts) and follow [qualification procedures](qualification.md) only after reviewing and choosing the operations yourself.
 
 Native worker failures have fixed, secret-screened categories and explicit recovery guidance. Provider/model identity never changes automatically. Quota, authentication, context, or uncertain transport failures do not trigger retries. `/task ID recover` is an approved new worker with a fresh transcript and preserved source changes. Existing provider-private execution state is not restored. Claude worker delegation remains blocked; Google consumer ACP remains direct-interaction-only.
 

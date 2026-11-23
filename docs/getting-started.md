@@ -59,6 +59,7 @@ Edit `.poly/agent/platform.json` with the existing version 1 configuration forma
 			"steps": [{ "id": "inspect", "agent": "source-reader", "objective": "{{input}}" }]
 		}
 	}
+}
 ```
 
 Run doctor and restart Pi after changing orchestration configuration. Commit or stash source changes before delegation. `/delegate` now offers an agent picker, followed by the objective and exact eligible model. Review the context packet and confirm the launch. `/workflow` similarly offers configured workflows. Role names do not determine permissions.

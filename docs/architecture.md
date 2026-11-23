@@ -26,7 +26,7 @@ flowchart TD
     Worker --> Provider[Eligible provider instance]
     Worker --> Files[Scoped tools in isolated Git worktree]
     Files --> Approval[Single-use test approval]
-    Approval --> Sandbox[Bubblewrap without network or host credentials]
+    Approval --> Sandbox[Bubblewrap with isolated network and temporary HOME]
     Tasks --> Context[Optional ContextRegistry]
     Context --> NativeContext[Reviewed native handoffs]
     Context --> Memory[MemPalace or trusted custom backend]
@@ -62,7 +62,11 @@ Trusted native extensions use `pi.registerTool`, `pi.registerCommand`, `pi.on` a
 
 The [worker runner](../src/orchestration/runner.ts) creates an independent `createAgentSession`, `ModelRuntime` and `SessionManager`. Its executable resource loader is disabled. A separate data-only native discovery pass resolves explicitly selected `pi:skill:NAME` and `pi:prompt:NAME` snapshots from installed resources. These do not grant supporting-file access, script execution, template arguments or native hooks. Approved programmatic worker tools remain trusted host code; permission metadata is not a JavaScript sandbox.
 
-Built-in file tools enforce project paths and reject credential paths and symlinks. Consequential tests require single-use approval and Bubblewrap without network, host HOME or provider credentials. Sandbox failure has no host-shell fallback. Source changes survive task failure or cancellation in retained worktrees. Integration requires completed inspection of the exact snapshot, unchanged parent/source revisions and separate human confirmation.
+Built-in [file tools](../src/orchestration/tools.ts) pass only checked absolute paths to Pi, block recognized sensitive paths and reject symlinks. Pattern screening cannot identify every secret. Single-use approved tests run with an isolated network, temporary HOME, system runtimes and the whole task worktree. Normal host credential stores and the parent Git common directory are not mounted; credentials already in source remain visible. Sandbox failure has no host-shell fallback.
+
+[Host Git](../src/orchestration/worktrees.ts) pins parent-derived task metadata, verifies its gitfile on every registered task call and disables hooks and filesystem monitoring. Legacy records acquire the pin during recovery. The sandbox additionally mounts the gitfile read-only. Source changes survive failure or cancellation. Review diffs force text rendering, identify changed `.gitattributes` and `.gitmodules`, summarize binary/control-byte files, and refuse patches above 48000 rendered characters.
+
+[Integration](../src/orchestration/tasks.ts) requires a completed read-only review task bound to the exact snapshot, unchanged parent/source revisions and separate human confirmation. This record validates task/revision association, not review quality or complete tool coverage. A distinct model is required by recipes that declare `distinctModelFrom`, not by every review task.
 
 ## Persistence and context
 

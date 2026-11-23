@@ -3,6 +3,17 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const prose = (text: string) => text.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, "");
+function jsonExamples(file: string, text: string): string[] {
+	const errors: string[] = [];
+	for (const match of text.matchAll(/^```json\n([\s\S]*?)^```\s*$/gm)) {
+		try {
+			JSON.parse(match[1]);
+		} catch {
+			errors.push(`${file}: invalid JSON example`);
+		}
+	}
+	return errors;
+}
 function anchors(text: string): Set<string> {
 	return new Set(
 		[...prose(text).matchAll(/^#{1,6}\s+(.+)$/gm)].map((match) =>
@@ -26,6 +37,7 @@ export function checkDocumentation(root: string): string[] {
 	const errors: string[] = [];
 	for (const file of files) {
 		const text = readFileSync(join(root, file), "utf8");
+		errors.push(...jsonExamples(file, text));
 		for (const match of prose(text).matchAll(/!?\[[^\]]*\]\(([^\s)]+)\)/g)) {
 			const target = match[1];
 			if (/^(?:[a-z]+:|\/\/)/i.test(target)) continue;

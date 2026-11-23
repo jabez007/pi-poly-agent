@@ -45,7 +45,7 @@ export const QUALIFICATION_SCENARIOS = [
 	],
 	[
 		"review",
-		"Use /implement, select a different authorized reviewer, inspect the exact diff and review, and decline then approve integration.",
+		"Enable the implementation-review recipe, then use /workflow implementation-review. Select a different authorized reviewer, inspect the exact diff and review, and decline then approve integration.",
 	],
 	[
 		"parallel",

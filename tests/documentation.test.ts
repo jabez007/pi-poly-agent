@@ -4,6 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { checkDocumentation } from "../scripts/check-docs.ts";
+import { bootstrap } from "../src/profile.ts";
+import { loadPlatform } from "../src/platform/config.ts";
+import { qualificationPlan } from "../src/orchestration/qualification.ts";
 
 test("documentation local links, heading references and command examples resolve", () => {
 	assert.deepEqual(checkDocumentation(resolve(import.meta.dirname, "..")), []);
@@ -38,4 +41,39 @@ test("application, lockfile, installed Pi and CLI pins agree without upgrading d
 	assert.equal(cli.bin.pi, "dist/bundle/cli.js");
 	const node = readFileSync(".nvmrc", "utf8").trim();
 	assert.ok(readFileSync(".github/workflows/check.yml", "utf8").includes(`node-version: ${node}`));
+});
+
+test("getting-started JSON loads its documented agent and workflow in a temporary profile", () => {
+	const text = readFileSync("docs/getting-started.md", "utf8");
+	const example = /```json\n([\s\S]*?)\n```/.exec(text)![1];
+	const root = mkdtempSync(join(tmpdir(), "poly-doc-example-"));
+	bootstrap(root);
+	JSON.parse(example);
+	writeFileSync(join(root, "platform.json"), example);
+	const config = loadPlatform(root, root);
+	assert.equal(config.agents[0].name, "source-reader");
+	assert.equal(config.workflows[0].id, "source-note");
+});
+
+test("documentation verification rejects invalid JSON examples", () => {
+	const root = mkdtempSync(join(tmpdir(), "poly-doc-json-"));
+	mkdirSync(join(root, "docs"));
+	writeFileSync(join(root, "package.json"), '{"scripts":{}}');
+	writeFileSync(join(root, "README.md"), '```json\n{"version": 1\n```\n');
+	assert.ok(checkDocumentation(root).some((error) => error.includes("invalid JSON example")));
+});
+
+test("qualification review procedure names the generic workflow and its required recipe", () => {
+	const plan = qualificationPlan("openai-codex");
+	const procedure = plan.scenarios.find((s) => s.id === "review")!.procedure;
+	assert.match(procedure, /\/workflow implementation-review/);
+	assert.match(procedure, /recipe/);
+	const root = mkdtempSync(join(tmpdir(), "poly-doc-qualification-"));
+	bootstrap(root);
+	writeFileSync(
+		join(root, "platform.json"),
+		JSON.stringify({ version: 1, recipes: ["implementation-review"] }),
+	);
+	const config = loadPlatform(root, root);
+	assert.ok(config.workflows.some((w) => w.id === "implementation-review"));
 });
