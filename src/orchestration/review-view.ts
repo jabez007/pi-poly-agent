@@ -141,13 +141,13 @@ function buildView(
 	const commands = inspectionCommands(cwd, base, revision);
 	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Refused entries have no patch access; not shown entries have no patch in this view.\n`;
 	const footer = `\nList every changed file:\n${commands.index}\nInspect the full ${revision ? "committed" : "uncommitted"} diff:\n${commands.patch}`;
-	const available = budget - header.length - footer.length - 256;
 	const offset = selection.offset ?? 0;
 	const page = filePage(records, offset);
 	const indexSize = page.map((r) => statLine(r, false)).join("\n").length + 1;
-	if (available < indexSize) throw new ReviewBudgetError(budget - available + indexSize, budget);
 	const next = offset + page.length;
 	const pagination = `\nFiles not listed in this view: ${records.length - page.length} of ${records.length}.\n${next < records.length ? `Next file offset: ${next}\n` : ""}Use review_diff with path "." and offset to page the approved file index.\n`;
+	const available = budget - header.length - footer.length - pagination.length;
+	if (available < indexSize) throw new ReviewBudgetError(budget - available + indexSize, budget);
 	const patchBudget = available - indexSize;
 	const patches = reviewPatches(
 		cwd,
