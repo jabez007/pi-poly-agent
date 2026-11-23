@@ -108,8 +108,38 @@ export function workspaceDiff(workspace: Workspace): { files: string[]; diff: st
 	const files = git(workspace.path, ["diff", "--name-only", workspace.base])
 		.split("\n")
 		.filter(Boolean);
-	const diff = git(workspace.path, ["diff", "--no-ext-diff", "--no-textconv", workspace.base]);
+	const diff =
+		controlFileNotice(files) +
+		renderReviewDiff(
+			git(workspace.path, [
+				"diff",
+				"--text",
+				"--no-color",
+				"--no-ext-diff",
+				"--no-textconv",
+				workspace.base,
+			]),
+		);
 	return { files, diff };
+}
+
+export function controlFileNotice(files: string[]): string {
+	const controls = files.filter((file) => /(^|\/)\.(gitattributes|gitmodules)$/.test(file));
+	return controls.length ? `Repository control files changed: ${controls.join(", ")}\n` : "";
+}
+
+/** Render forced text diffs without sending terminal control bytes or unbounded output. */
+export function renderReviewDiff(diff: string): string {
+	const rendered = diff
+		.split(/(?=^diff --git )/m)
+		.map((part) => {
+			if (!/\p{Cc}/u.test(part.replace(/[\t\n\r]/g, ""))) return part;
+			return `${part.split("\n")[0]}\nBinary or control-byte content changed; raw bytes omitted. Inspect this file separately.\n`;
+		})
+		.join("");
+	if (rendered.length > 48000)
+		throw new Error("Diff exceeds 48000 characters; inspect smaller files manually before review");
+	return rendered;
 }
 export function snapshotWorkspace(workspace: Workspace): string {
 	pinWorkspace(workspace);

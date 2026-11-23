@@ -25,6 +25,7 @@ import {
 	integrateWorkspace,
 	assertIntegration,
 	pinWorkspace,
+	controlFileNotice,
 	git,
 	type Workspace,
 } from "./worktrees.ts";
@@ -371,7 +372,7 @@ export class TaskManager {
 					task = {
 						...input,
 						requestBudget: intersectRequestBudget(input.requestBudget, replacement?.requestBudget),
-						context: input.context || "",
+						context: controlFileNotice(review?.result?.files || []) + (input.context || ""),
 						id,
 						depth: 1,
 						status: "created",

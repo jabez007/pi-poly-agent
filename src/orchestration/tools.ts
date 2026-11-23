@@ -1,4 +1,4 @@
-import { git } from "./worktrees.ts";
+import { git, renderReviewDiff } from "./worktrees.ts";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -200,6 +200,8 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
 			const diff = git(cwd, [
 				"diff",
+				"--text",
+				"--no-color",
 				"--no-ext-diff",
 				"--no-textconv",
 				base,
@@ -207,9 +209,9 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 				"--",
 				args.path,
 			]);
-			assertNoSecrets(diff);
-			if (diff.length > 48000) throw new Error("Diff too large; inspect a smaller file manually");
-			return { content: [{ type: "text", text: diff }], details: { base } };
+			const rendered = renderReviewDiff(diff);
+			assertNoSecrets(rendered);
+			return { content: [{ type: "text", text: rendered }], details: { base } };
 		},
 	};
 }
