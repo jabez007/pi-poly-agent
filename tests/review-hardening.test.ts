@@ -130,8 +130,16 @@ test("integration preview preserves the reviewer's approved visibility limits", 
 	}
 });
 
-test("all invisible Unicode code points are escaped in every review view", async () => {
+test("all invisible and default-ignorable code points are escaped in every review view", async () => {
 	const points = [
+		0x034f,
+		0x115f,
+		0x1160,
+		0x17b4,
+		0xffa0,
+		0xfe0f,
+		0xe0100,
+		0x2800,
 		0x00ad,
 		0x180e,
 		0x200b,

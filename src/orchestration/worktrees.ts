@@ -314,7 +314,7 @@ export function controlFileNotice(files: string[]): string {
 /** Escape unsafe characters without dropping any source line. */
 export function escapeDiffText(text: string): string {
 	return text.replace(
-		/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u180e\u3164\u{e0000}-\u{e007f}]/gu,
+		/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\u3164]/gu,
 		(character) => {
 			if (character === "\n") return "\n";
 			const point = character.codePointAt(0)!;
