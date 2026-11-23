@@ -197,14 +197,14 @@ test("streamed review capture refuses nested repositories before Git", () => {
 	);
 });
 
-test("remaining metadata capture limits report measured size limit and manual recovery", () => {
+test("remaining metadata capture limits report a lower bound and manual recovery", () => {
 	const { root, directory } = temporaryRepository();
 	const workspace = createWorkspace(root, directory, "fixture");
 	writeFileSync(join(workspace.path, "large.txt"), binary);
 	const revision = snapshotWorkspace(workspace);
 	assert.throws(
 		() => git(root, ["show", `${revision}:large.txt`]),
-		/Git metadata output reached \d+ bytes.*2097152.*manually/,
+		/Git metadata output is more than the 2097152 byte limit.*manually/,
 		"A metadata size rejection must never become diagnostics withheld",
 	);
 });

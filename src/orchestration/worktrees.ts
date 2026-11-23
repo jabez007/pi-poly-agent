@@ -120,9 +120,8 @@ export function git(cwd: string, args: string[]): string {
 		}).trim();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOBUFS") {
-			const output = (error as { stdout?: string | Buffer }).stdout || "";
 			throw new Error(
-				`Git metadata output reached ${Buffer.byteLength(output)} bytes, exceeding the ${metadataBufferLimit} byte limit; inspect the retained task branch manually`,
+				`Git metadata output is more than the ${metadataBufferLimit} byte limit; inspect the retained task branch manually`,
 			);
 		}
 		throw new Error("Git operation failed; diagnostics withheld");
