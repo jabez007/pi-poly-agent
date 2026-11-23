@@ -5,12 +5,21 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafeProfile } from "../profile.ts";
 
 const pinnedWorkspaces = new Map<string, Workspace>();
+const taskDirectories = new Set<string>();
+
+/** Internal registration from the task controller; never inferred from task-owned files. */
+export function registerTaskDirectory(directory: string): void {
+	taskDirectories.add(resolve(directory));
+}
+function containsPath(root: string, target: string): boolean {
+	const path = relative(root, resolve(target));
+	return !path || (!path.startsWith("..") && !isAbsolute(path));
+}
 
 export function git(cwd: string, args: string[]): string {
-	const workspace = [...pinnedWorkspaces.values()].find((w) => {
-		const path = relative(w.path, resolve(cwd));
-		return !path || (!path.startsWith("..") && !isAbsolute(path));
-	});
+	const workspace = [...pinnedWorkspaces.values()].find((w) => containsPath(w.path, cwd));
+	if (!workspace && [...taskDirectories].some((directory) => containsPath(directory, cwd)))
+		throw new Error("Unregistered task worktree has no pinned workspace; inspect manually");
 	const location = workspace ? workspaceLocation(workspace) : [];
 	const env = Object.fromEntries(
 		Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),

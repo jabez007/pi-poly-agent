@@ -197,9 +197,9 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			"Read the implementation diff against the inspected task's original base. Does not modify files.",
 		parameters: Type.Object({ path: Type.String() }),
 		execute: async (_id, args: any) => {
-			scopedPath(cwd, args.path);
+			const path = scopedPath(cwd, args.path);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
-			const rendered = reviewDiffView(cwd, base, git(cwd, ["rev-parse", "HEAD"]), [args.path]);
+			const rendered = reviewDiffView(cwd, base, git(cwd, ["rev-parse", "HEAD"]), [path]);
 			assertNoSecrets(rendered);
 			return { content: [{ type: "text", text: rendered }], details: { base } };
 		},

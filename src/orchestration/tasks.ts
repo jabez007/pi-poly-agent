@@ -27,6 +27,7 @@ import {
 	assertIntegration,
 	controlFileNotice,
 	git,
+	registerTaskDirectory,
 	type Workspace,
 } from "./worktrees.ts";
 
@@ -194,6 +195,7 @@ export class TaskManager {
 		private restrictions: Partial<ExecutionPolicy> = {},
 	) {
 		assertSafeProfile(directory);
+		registerTaskDirectory(directory);
 		if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4)
 			throw new Error("Invalid task concurrency");
 		mkdirSync(directory, { recursive: true, mode: 0o700 });

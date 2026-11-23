@@ -15,10 +15,10 @@ export function reviewDiffView(
 	if (![base, revision].every((value) => /^[a-f0-9]{40,64}$/.test(value)))
 		throw new Error("Invalid review revision");
 	const options = [...diffOptions, base, revision, "--", ...paths];
-	const raw = git(cwd, ["diff", ...options]);
+	const raw = git(cwd, ["--literal-pathspecs", "diff", ...options]);
 	assertNoSecrets(raw);
 	const full = renderReviewDiff(raw);
-	const records = git(cwd, ["diff", "--numstat", "-z", ...options])
+	const records = git(cwd, ["--literal-pathspecs", "diff", "--numstat", "-z", ...options])
 		.split("\0")
 		.filter(Boolean)
 		.map((record) => {
