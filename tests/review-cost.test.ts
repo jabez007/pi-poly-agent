@@ -41,7 +41,7 @@ test("a 600-file review uses one walk and a constant number of Git queries", () 
 			1,
 			"Every query in one synchronous view must share one completed worktree walk",
 		);
-		assert.ok(calls <= 3, `Git query count must be constant, observed ${calls}`);
+		assert.ok(calls <= 4, `Git query count must be constant, observed ${calls}`);
 	} finally {
 		fs.readdirSync = readdir;
 		childProcess.execFileSync = exec;

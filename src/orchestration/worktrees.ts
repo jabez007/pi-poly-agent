@@ -39,8 +39,9 @@ function readonlyQuery(args: string[]): boolean {
 		.slice(0, end < 0 ? rest.length : end)
 		.every(
 			(arg) =>
-				[...reviewDiffOptions, "--numstat", "-z", "--ignore-submodules=all"].includes(arg) ||
-				/^[a-f0-9]{40,64}$/.test(arg),
+				[...reviewDiffOptions, "--numstat", "--raw", "-z", "--ignore-submodules=all"].includes(
+					arg,
+				) || /^[a-f0-9]{40,64}$/.test(arg),
 		);
 }
 
