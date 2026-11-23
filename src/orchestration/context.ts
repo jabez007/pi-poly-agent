@@ -1,5 +1,4 @@
 import { assertNoSecrets, type Handoff } from "../memory.ts";
-import { controlFileNotice } from "./worktrees.ts";
 import { REVIEW_CONTEXT_BUDGET, reviewDiffView } from "./review-view.ts";
 /** Select whole attributed entries rather than truncating serialized handoffs or copying transcripts. */
 export function focusedContext(
@@ -41,7 +40,6 @@ export function taskContext(knowledge: string, previous?: Task, budget = 16000):
 		} else omitted.add(label);
 	};
 	if (previous) {
-		add(controlFileNotice(previous.result?.files || []), "Control file notice");
 		add(previousReviewView(previous, budget), "Review view");
 		add(
 			`Historical task ${previous.id}, ${previous.provider}/${previous.model}\nRevision: ${previous.revision || previous.workspace.base}\nAgent claims are unverified; inspect original task for omitted details.`,

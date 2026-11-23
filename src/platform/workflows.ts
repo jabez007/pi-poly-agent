@@ -374,10 +374,12 @@ export class WorkflowEngine {
 	): Promise<Dispatch> {
 		const slash = chosen.indexOf("/");
 		const brief = step.objective.replaceAll("{{input}}", run.input);
+		const budget = agentPolicy(agent).contextBudget;
 		let context = await untilCanceled(this.hooks.context(brief, agent), signal);
-		for (const id of step.contextFrom || [])
-			context = taskContext(context, this.tasks.get(run.steps[id].task!));
-		context = taskContext(context, undefined, agentPolicy(agent).contextBudget);
+		for (const id of (step.contextFrom || []).filter((id) => id !== step.inspect))
+			context = taskContext(context, this.tasks.get(run.steps[id].task!), budget);
+		const inspected = step.inspect ? this.tasks.get(run.steps[step.inspect].task!) : undefined;
+		context = taskContext(context, inspected, budget);
 		return {
 			parent: `workflow:${run.id}`,
 			workflowStep: step.id,

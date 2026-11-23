@@ -129,6 +129,15 @@ test("guided /implement selects distinct models, offers review, shows results an
 	const root = mkdtempSync(join(tmpdir(), "poly-guided-project-"));
 	const profile = mkdtempSync(join(tmpdir(), "poly-guided-profile-"));
 	bootstrap(profile);
+	writeFileSync(
+		join(profile, "platform.json"),
+		JSON.stringify({
+			version: 1,
+			recipes: ["implementation-review"],
+			compatibility: true,
+			policy: { contextBudget: 4000 },
+		}),
+	);
 	git(root, ["init", "-b", "main"]);
 	git(root, ["config", "user.name", "Fixture"]);
 	git(root, ["config", "user.email", "fixture@example.invalid"]);
@@ -140,6 +149,7 @@ test("guided /implement selects distinct models, offers review, shows results an
 	const completed: Task[] = [];
 	const notifications: string[] = [];
 	const approvals: string[] = [];
+	const packets: string[] = [];
 	let integrate = false;
 	const pi = {
 		registerCommand: (name: string, config: any) => commands.set(name, config),
@@ -164,7 +174,12 @@ test("guided /implement selects distinct models, offers review, shows results an
 		ui: {
 			notify: (text: string) => notifications.push(text),
 			setStatus: () => {},
-			editor: async (_title: string, text: string) => text,
+			editor: async (_title: string, text: string) => {
+				const packet = JSON.parse(text);
+				packet.context += "\nWORKFLOW-APPROVED-TAIL";
+				packets.push(packet.context);
+				return JSON.stringify(packet);
+			},
 			select: async (title: string, choices: string[]) =>
 				title.includes("reviewer")
 					? choices.find((c) => c.includes("kimi"))
@@ -198,6 +213,12 @@ test("guided /implement selects distinct models, offers review, shows results an
 	for (let i = 0; i < 200 && !approvals.some((a) => a.includes("Integrate")); i++)
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.equal(completed.length, 2);
+	assert.deepEqual(
+		completed.map((task) => task.context),
+		packets,
+		"Workflow workers must receive their approved packets byte for byte",
+	);
+	assert.ok(completed.every((task) => task.context!.length <= 4000));
 	assert.deepEqual(
 		completed.map((t) => t.provider),
 		["openai-codex", "kimi-coding"],

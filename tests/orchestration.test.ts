@@ -1,3 +1,4 @@
+import { taskContext } from "../src/orchestration/context.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -260,7 +261,7 @@ test("real independent Pi SDK sessions implement with Codex and review with Kimi
 	assert.match(workspaceDiff(built.workspace).diff, /answer = 42/);
 	const reviewer = manager.dispatch({
 		...input("reviewer", "kimi-coding"),
-		context: `Review builder ${built.id}. Git snapshot ${built.revision}`,
+		context: taskContext(`Review builder ${built.id}. Git snapshot ${built.revision}`, built),
 		reviewOf: built.id,
 	});
 	const reviewed = await manager.wait(reviewer.id);

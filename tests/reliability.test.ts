@@ -97,7 +97,11 @@ test("killed host recovery preserves source, sessions, history, and explicitly c
 		assert.equal(manager.get(old.id).status, "interrupted");
 		assert.equal(readFileSync(join(root, "app.ts"), "utf8"), "before\n");
 		const review = await manager.wait(
-			manager.dispatch({ ...dispatch("reviewer", "kimi-coding"), reviewOf: replaced.id }).id,
+			manager.dispatch({
+				...dispatch("reviewer", "kimi-coding"),
+				reviewOf: replaced.id,
+				context: taskContext("", replaced),
+			}).id,
 		);
 		assert.equal(review.reviewRevision, replaced.revision);
 		manager.integrate(replaced.id);
@@ -185,7 +189,11 @@ test("integration rejects stale reviews, changed snapshots, parent branch change
 	});
 	const builder = await manager.wait(manager.dispatch(dispatch()).id);
 	await manager.wait(
-		manager.dispatch({ ...dispatch("reviewer", "kimi-coding"), reviewOf: builder.id }).id,
+		manager.dispatch({
+			...dispatch("reviewer", "kimi-coding"),
+			reviewOf: builder.id,
+			context: taskContext("", builder),
+		}).id,
 	);
 	writeFileSync(join(builder.workspace.path, "app.ts"), "changed after review\n");
 	assert.throws(() => manager.integrate(builder.id), /changed/);

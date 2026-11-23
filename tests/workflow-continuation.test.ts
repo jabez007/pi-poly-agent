@@ -1,3 +1,4 @@
+import { taskContext } from "../src/orchestration/context.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
@@ -339,6 +340,7 @@ test("completed implementation and independent inspection snapshots remain reusa
 				model: "fixture",
 				brief: "Inspect",
 				reviewOf: implementation.id,
+				context: taskContext("", implementation),
 			}).id,
 		);
 		const graph: WorkflowDefinition = {

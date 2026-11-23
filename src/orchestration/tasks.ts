@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assertEnvironment, type Policy } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
-import { reviewDiffView } from "./review-view.ts";
+import { REVIEW_CONTEXT_BUDGET, reviewDiffView } from "./review-view.ts";
 import { assertSafeProfile } from "../profile.ts";
 import type { Role } from "./roles.ts";
 import {
@@ -25,7 +25,6 @@ import {
 	inspectWorkspace,
 	integrateWorkspace,
 	assertIntegration,
-	controlFileNotice,
 	git,
 	registerTaskDirectory,
 	type Workspace,
@@ -332,7 +331,9 @@ export class TaskManager {
 			input.policy || {},
 		);
 		if ((input.context || "").length > execution.contextBudget)
-			throw new Error("Context exceeds effective agent budget");
+			throw new Error(
+				`Approved context is ${input.context!.length} characters; effective budget is ${execution.contextBudget}, exceeded by ${input.context!.length - execution.contextBudget}. Review and shorten the packet before dispatch.`,
+			);
 		const capabilities = this.registry.capabilities(input.provider);
 		assertAgentModel(input, capabilities);
 		if (execution.permissions.includes("write") && !capabilities.editing)
@@ -610,20 +611,22 @@ function reviewContext(input: Dispatch, review?: Task): string {
 	const context = input.context || "";
 	if (!review?.revision) return context;
 	const limit = input.policy?.contextBudget ?? 16000;
-	const view =
-		controlFileNotice(review.result?.files || []) +
-		reviewDiffView(
-			review.workspace.path,
-			review.workspace.base,
-			review.revision,
-			[],
-			Math.min(limit, 6000),
-		);
-	if (view.length > limit)
+	const view = reviewDiffView(
+		review.workspace.path,
+		review.workspace.base,
+		review.revision,
+		[],
+		Math.min(limit, REVIEW_CONTEXT_BUDGET),
+	);
+	if (!context.includes(view))
 		throw new Error(
-			"Review file manifest exceeds context budget; increase it or inspect a smaller task",
+			"Approved context is missing the required review view; reopen the context editor and retain it unchanged",
 		);
-	return view + "\n\n" + context.slice(0, Math.max(0, limit - view.length - 2));
+	if (context.split(view).length !== 2)
+		throw new Error(
+			"Approved context must contain the required review view exactly once; reopen the context editor",
+		);
+	return context;
 }
 
 function assertAgentModel(input: Dispatch, capabilities: Capabilities): void {

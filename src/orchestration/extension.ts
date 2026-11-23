@@ -460,20 +460,18 @@ export function registerOrchestration(
 		return (workflows ??= new WorkflowEngine(
 			join(profile, "tasks", projectIdentity(ctx.cwd).wing, "workflows"),
 			host,
-			config().agents,
+			config().agents.map((agent) => ({
+				...agent,
+				policy: effectivePolicy(agentPolicy(agent), config().policy),
+			})),
 			{
 				model: (agent, model) => modelChoice(ctx, agent, model),
 				context: async (objective, agent) => await contextPacket(objective, agent.context),
 				approve: async (step, input, signal) => {
 					const epoch = generation;
-					const previous = input.reviewOf ? host.get(input.reviewOf) : undefined;
 					const edited = await ctx.ui.editor(
 						"Review focused task context. No parent transcript is inherited.",
-						JSON.stringify(
-							{ brief: input.brief, context: taskContext(input.context || "", previous) },
-							null,
-							2,
-						),
+						JSON.stringify({ brief: input.brief, context: input.context || "" }, null, 2),
 					);
 					if (!edited || signal.aborted) return false;
 					const packet = parseTaskPacket(edited);
