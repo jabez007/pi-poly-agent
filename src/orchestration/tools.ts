@@ -1,9 +1,9 @@
 import { git } from "./worktrees.ts";
 import { reviewDiffView } from "./review-view.ts";
-import { gitMetadataName } from "./path-policy.ts";
+import { literalFileMessage, pathHasUnicodeSpace, sourcePathAllowed } from "./path-policy.ts";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import {
 	createReadTool,
@@ -17,20 +17,10 @@ export function scopedPath(root: string, path: string): string {
 	const canonical = realpathSync(root);
 	const target = resolve(root, path);
 	// Pi must receive the same absolute path that passes the source-context check.
-	if (/^[@~]|^file:/i.test(path) || /[\u00a0\u2000-\u200a\u202f\u205f\u3000]/.test(target))
+	if (/^[@~]|^file:/i.test(path) || pathHasUnicodeSpace(target))
 		throw new Error("Worker path shorthand or Unicode space normalization refused");
 	const rel = relative(canonical, target);
-	if (
-		!rel ||
-		rel.startsWith("..") ||
-		isAbsolute(rel) ||
-		rel
-			.split("/")
-			.some(
-				(part) => gitMetadataName(part) || /^\.(poly|env|aws|claude|codex|ssh)(\.|$)/i.test(part),
-			)
-	)
-		throw new Error("Worker path is outside approved source context");
+	if (!sourcePathAllowed(rel)) throw new Error("Worker path is outside approved source context");
 	let current = target;
 	while (current !== canonical) {
 		const status = lstatSync(current, { throwIfNoEntry: false });
@@ -208,9 +198,7 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			const indexOnly = args.path === ".";
 			const path = indexOnly ? undefined : scopedPath(cwd, args.path);
 			if (path && lstatSync(path, { throwIfNoEntry: false })?.isDirectory())
-				throw new Error(
-					'review_diff requires a literal file path; use path "." for the paginated file index',
-				);
+				throw new Error(literalFileMessage);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
 			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
 				throw new Error("Invalid review file offset");
@@ -230,7 +218,12 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 				git(cwd, ["rev-parse", "HEAD"]),
 				path ? [path] : [],
 				48000,
-				{ offset: args.offset, indexOnly, accept },
+				{
+					offset: args.offset,
+					indexOnly,
+					accept,
+					exactPath: path ? relative(cwd, path) : undefined,
+				},
 			);
 			assertNoSecrets(rendered);
 			return { content: [{ type: "text", text: rendered }], details: { base } };

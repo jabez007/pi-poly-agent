@@ -1,4 +1,5 @@
 import { assertNoSecrets } from "../secrets.ts";
+import { assertLiteralSourceFiles } from "./path-policy.ts";
 import {
 	controlFileNotice,
 	escapeDiffText,
@@ -88,10 +89,17 @@ interface ViewSelection {
 	offset?: number;
 	indexOnly?: boolean;
 	accept?: (file: string) => boolean;
+	exactPath?: string;
 }
 function selectedRecords(cwd: string, options: string[], selection: ViewSelection): FileStat[] {
+	const records = reviewFileIndex(cwd, options);
+	if (selection.exactPath !== undefined)
+		assertLiteralSourceFiles(
+			records.map((r) => r.file),
+			selection.exactPath,
+		);
 	if (!selection.indexOnly) scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
-	return reviewFileIndex(cwd, options).filter((r) => !selection.accept || selection.accept(r.file));
+	return records.filter((r) => !selection.accept || selection.accept(r.file));
 }
 function controlNotice(records: FileStat[]): string {
 	const controls = records.filter((r) => /(^|\/)\.(gitattributes|gitmodules)$/.test(r.file));
