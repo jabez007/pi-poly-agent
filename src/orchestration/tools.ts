@@ -202,16 +202,6 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
 			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
 				throw new Error("Invalid review file offset");
-			const accept = indexOnly
-				? (file: string) => {
-						try {
-							scopedPath(cwd, file);
-							return true;
-						} catch {
-							return false;
-						}
-					}
-				: undefined;
 			const rendered = reviewDiffView(
 				cwd,
 				base,
@@ -221,7 +211,6 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 				{
 					offset: args.offset,
 					indexOnly,
-					accept,
 					exactPath: path ? relative(cwd, path) : undefined,
 				},
 			);

@@ -87,7 +87,9 @@ test("review_diff directory requests cannot reveal sensitive filenames", async (
 		);
 		assert.match(failure, /literal file path/);
 		const index = await tool.execute("fixture", { path: "." }, undefined, undefined, {} as any);
-		assert.ok(!JSON.stringify(index).includes("config/.env"));
+		assert.ok(JSON.stringify(index).includes("config/.env"));
+		assert.match(JSON.stringify(index), /refused by path policy/);
+		assert.ok(!JSON.stringify(index).includes("private fixture note"));
 		assert.ok(JSON.stringify(index).includes("config/app.txt"));
 	} finally {
 		await host.close();

@@ -1,5 +1,5 @@
 import { assertNoSecrets } from "../secrets.ts";
-import { assertLiteralSourceFiles } from "./path-policy.ts";
+import { assertLiteralSourceFiles, sourcePathAllowed } from "./path-policy.ts";
 import {
 	controlFileNotice,
 	escapeDiffText,
@@ -61,6 +61,7 @@ function filePatch(
 		Math.min(65536, Math.max(1, budget + 1)),
 	);
 	if (!fits) return;
+	if ((raw.match(/(?:^|\n)diff --git /g) || []).length !== 1) return;
 	const rendered = escapeDiffText(raw);
 	return rendered.length <= budget ? rendered : undefined;
 }
@@ -88,7 +89,6 @@ function lineCounts(record: FileStat): string {
 interface ViewSelection {
 	offset?: number;
 	indexOnly?: boolean;
-	accept?: (file: string) => boolean;
 	exactPath?: string;
 }
 function selectedRecords(cwd: string, options: string[], selection: ViewSelection): FileStat[] {
@@ -99,7 +99,7 @@ function selectedRecords(cwd: string, options: string[], selection: ViewSelectio
 			selection.exactPath,
 		);
 	if (!selection.indexOnly) scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
-	return records.filter((r) => !selection.accept || selection.accept(r.file));
+	return records;
 }
 function controlNotice(records: FileStat[]): string {
 	const controls = records.filter((r) => /(^|\/)\.(gitattributes|gitmodules)$/.test(r.file));
@@ -115,19 +115,24 @@ function controlNotice(records: FileStat[]): string {
 			: "")
 	);
 }
-function filePage(records: FileStat[], offset: number, budget: number): FileStat[] {
+function filePage(records: FileStat[], offset: number): FileStat[] {
 	const page: FileStat[] = [];
 	let used = 0;
 	for (const record of records.slice(offset)) {
 		const cost = statLine(record, false).length + 1;
-		if (used + cost > budget) break;
+		if (page.length && (used + cost > 1024 || page.length === 32)) break;
 		page.push(record);
 		used += cost;
 	}
 	return page;
 }
 function statLine(record: FileStat, shown: boolean): string {
-	return `[${shown ? "patch shown" : "not shown  "}] ${escapeDiffText(JSON.stringify(record.file))} ${lineCounts(record)}`;
+	const state = sourcePathAllowed(record.file)
+		? shown
+			? "patch shown"
+			: "not shown  "
+		: "refused by path policy";
+	return `[${state}] ${escapeDiffText(JSON.stringify(record.file))} ${lineCounts(record)}`;
 }
 function pageContent(
 	cwd: string,
@@ -142,7 +147,7 @@ function pageContent(
 	let remaining = budget - page.map((r) => statLine(r, false)).join("\n").length - 1;
 	for (const record of page) {
 		const patch =
-			!indexOnly && remaining > 0
+			!indexOnly && remaining > 0 && sourcePathAllowed(record.file)
 				? filePatch(cwd, base, revision, record.file, remaining)
 				: undefined;
 		index.push(statLine(record, patch !== undefined));
@@ -167,15 +172,16 @@ export function reviewDiffView(
 	const records = selectedRecords(cwd, options, selection);
 	if (!records.length) return "";
 	const commands = inspectionCommands(cwd, base, revision);
-	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Entries marked not shown have no patch in this view.\n`;
+	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Refused entries have no patch access; not shown entries have no patch in this view.\n`;
 	const footer = `\nList every changed file:\n${commands.index}\nInspect the full committed diff:\n${commands.patch}`;
 	const available = budget - header.length - footer.length - 256;
-	if (available < 0)
-		throw new Error(
-			`Review view needs ${budget - available} characters of metadata; budget is ${budget}. Increase the context budget or inspect the task manually.`,
-		);
 	const offset = selection.offset ?? 0;
-	const page = filePage(records, offset, Math.floor(available / 2));
+	const page = filePage(records, offset);
+	const indexSize = page.map((r) => statLine(r, false)).join("\n").length + 1;
+	if (available < indexSize)
+		throw new Error(
+			`Review view needs ${budget - available + indexSize} characters of metadata; budget is ${budget}. Increase the context budget or inspect the task manually.`,
+		);
 	const next = offset + page.length;
 	const pagination = `\nFiles not listed in this view: ${records.length - page.length} of ${records.length}.\n${next < records.length ? `Next file offset: ${next}\n` : ""}Use review_diff with path "." and offset to page the approved file index.\n`;
 	return (

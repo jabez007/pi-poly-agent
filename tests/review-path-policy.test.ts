@@ -58,6 +58,10 @@ for (const state of ["deleted", "replaced", "existing"]) {
 				}).id,
 			);
 			const tool = diffTool(review.workspace.path, review.reviewBase!);
+			assert.ok(
+				!review.context!.includes("private fixture note"),
+				"The shared name policy must also protect review packets",
+			);
 			let output: unknown,
 				failure = "";
 			try {
