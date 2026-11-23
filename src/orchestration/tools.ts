@@ -207,6 +207,10 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 		execute: async (_id, args: any) => {
 			const indexOnly = args.path === ".";
 			const path = indexOnly ? undefined : scopedPath(cwd, args.path);
+			if (path && lstatSync(path, { throwIfNoEntry: false })?.isDirectory())
+				throw new Error(
+					'review_diff requires a literal file path; use path "." for the paginated file index',
+				);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
 			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
 				throw new Error("Invalid review file offset");

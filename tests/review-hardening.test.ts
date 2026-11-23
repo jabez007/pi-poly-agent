@@ -50,6 +50,35 @@ test("renamed control files remain named in the canonical changed-file list", as
 	}
 });
 
+test("review_diff directory requests cannot reveal sensitive filenames", async () => {
+	const host = await reviewedProject((task) => {
+		mkdirSync(join(task.workspace.path, "config"));
+		writeFileSync(join(task.workspace.path, "config/.env"), "private fixture note\n");
+		writeFileSync(join(task.workspace.path, "config/app.txt"), "visible fixture note\n");
+	});
+	try {
+		const review = host.completed.find((t) => t.reviewOf === host.builder.id)!;
+		const tool = diffTool(review.workspace.path, review.reviewBase!);
+		let output: unknown;
+		let failure = "";
+		try {
+			output = await tool.execute("fixture", { path: "config" }, undefined, undefined, {} as any);
+		} catch (error) {
+			failure = String(error);
+		}
+		assert.ok(
+			!JSON.stringify(output || "").includes("private fixture note"),
+			"A directory request must not return a name-blocked file's patch",
+		);
+		assert.match(failure, /literal file path/);
+		const index = await tool.execute("fixture", { path: "." }, undefined, undefined, {} as any);
+		assert.ok(!JSON.stringify(index).includes("config/.env"));
+		assert.ok(JSON.stringify(index).includes("config/app.txt"));
+	} finally {
+		await host.close();
+	}
+});
+
 test("case-insensitive Git metadata names are refused in task worktrees", async () => {
 	const { root, directory } = temporaryRepository();
 	const workspace = createWorkspace(root, directory, "fixture");

@@ -92,6 +92,10 @@ interface ViewSelection {
 	indexOnly?: boolean;
 	accept?: (file: string) => boolean;
 }
+function selectedRecords(cwd: string, options: string[], selection: ViewSelection): FileStat[] {
+	if (!selection.indexOnly) scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
+	return reviewFileIndex(cwd, options).filter((r) => !selection.accept || selection.accept(r.file));
+}
 function controlNotice(records: FileStat[]): string {
 	const controls = records.filter((r) => /(^|\/)\.(gitattributes|gitmodules)$/.test(r.file));
 	const shown: string[] = [];
@@ -157,10 +161,7 @@ export function reviewDiffView(
 	if (!/^[a-f0-9]{40,64}$/.test(base) || (revision && !/^[a-f0-9]{40,64}$/.test(revision)))
 		throw new Error("Invalid review revision");
 	const options = [...reviewDiffOptions, base, ...(revision ? [revision] : []), "--", ...paths];
-	scanGitOutput(cwd, ["--literal-pathspecs", "diff", ...options]);
-	const records = reviewFileIndex(cwd, options).filter(
-		(r) => !selection.accept || selection.accept(r.file),
-	);
+	const records = selectedRecords(cwd, options, selection);
 	const commands = inspectionCommands(cwd, base, revision);
 	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Entries marked not shown have no patch in this view.\n`;
 	const footer = `\nList every changed file:\n${commands.index}\nInspect the full committed diff:\n${commands.patch}`;
