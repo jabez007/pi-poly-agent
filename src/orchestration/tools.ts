@@ -13,6 +13,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { assertNoSecrets } from "../memory.ts";
 
+const sourcePathMessage = "Worker path is outside approved source context";
+function sourceStatus(path: string) {
+	try {
+		return lstatSync(path, { throwIfNoEntry: false });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOTDIR") throw new Error(sourcePathMessage);
+		throw error;
+	}
+}
+
 export function scopedPath(root: string, path: string): string {
 	const canonical = realpathSync(root);
 	const target = resolve(root, path);
@@ -20,10 +30,10 @@ export function scopedPath(root: string, path: string): string {
 	if (/^[@~]|^file:/i.test(path) || pathHasUnicodeSpace(target))
 		throw new Error("Worker path shorthand or Unicode space normalization refused");
 	const rel = relative(canonical, target);
-	if (!sourcePathAllowed(rel)) throw new Error("Worker path is outside approved source context");
+	if (!sourcePathAllowed(rel)) throw new Error(sourcePathMessage);
 	let current = target;
 	while (current !== canonical) {
-		const status = lstatSync(current, { throwIfNoEntry: false });
+		const status = sourceStatus(current);
 		if (status && (status.isSymbolicLink() || realpathSync(current) !== current))
 			throw new Error("Worker symlink access refused");
 		current = dirname(current);
@@ -197,8 +207,7 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 		execute: async (_id, args: any) => {
 			const indexOnly = args.path === ".";
 			const path = indexOnly ? undefined : scopedPath(cwd, args.path);
-			if (path && lstatSync(path, { throwIfNoEntry: false })?.isDirectory())
-				throw new Error(literalFileMessage);
+			if (path && sourceStatus(path)?.isDirectory()) throw new Error(literalFileMessage);
 			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
 			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
 				throw new Error("Invalid review file offset");
