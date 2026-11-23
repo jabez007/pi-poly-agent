@@ -14,6 +14,9 @@ import { assertNoSecrets } from "../memory.ts";
 export function scopedPath(root: string, path: string): string {
 	const canonical = realpathSync(root);
 	const target = resolve(root, path);
+	// Pi must receive the same absolute path that passes the source-context check.
+	if (/^[@~]|^file:/i.test(path) || /[\u00a0\u2000-\u200a\u202f\u205f\u3000]/.test(target))
+		throw new Error("Worker path shorthand or Unicode space normalization refused");
 	const rel = relative(canonical, target);
 	if (
 		!rel ||
@@ -41,9 +44,9 @@ export function scopedTools(cwd: string, editing: boolean): ToolDefinition[] {
 	return tools.map((tool) => ({
 		...tool,
 		execute: async (id: string, args: any, signal: AbortSignal | undefined, update: any) => {
-			scopedPath(cwd, args.path);
+			const path = scopedPath(cwd, args.path);
 			assertNoSecrets(args);
-			const result = await tool.execute(id, args, signal, update);
+			const result = await tool.execute(id, { ...args, path }, signal, update);
 			assertNoSecrets(result);
 			return result;
 		},
