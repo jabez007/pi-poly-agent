@@ -17,7 +17,16 @@ export function git(cwd: string, args: string[]): string {
 	try {
 		return execFileSync(
 			"git",
-			["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...location, ...args],
+			[
+				"-c",
+				"core.hooksPath=/dev/null",
+				"-c",
+				"core.fsmonitor=false",
+				"-c",
+				"diff.ignoreSubmodules=all",
+				...location,
+				...submoduleSafeArgs(args, !!workspace),
+			],
 			{
 				cwd,
 				env,
@@ -29,6 +38,24 @@ export function git(cwd: string, args: string[]): string {
 		).trim();
 	} catch {
 		throw new Error("Git operation failed; diagnostics withheld");
+	}
+}
+
+function submoduleSafeArgs(args: string[], task: boolean): string[] {
+	const command = args[0] === "--literal-pathspecs" ? 1 : 0;
+	if (!task || !["diff", "status"].includes(args[command])) return args;
+	return [...args.slice(0, command + 1), "--ignore-submodules=all", ...args.slice(command + 1)];
+}
+
+const nestedRepositoryMessage =
+	"Worktree contains a nested repository; inspect the worktree manually";
+function refuseNestedRepositories(root: string, directory = root): void {
+	for (const entry of readdirSync(directory, { withFileTypes: true })) {
+		if (entry.name === ".git") {
+			if (directory === root) continue;
+			throw new Error(nestedRepositoryMessage);
+		}
+		if (entry.isDirectory()) refuseNestedRepositories(root, join(directory, entry.name));
 	}
 }
 export interface Workspace {
@@ -66,10 +93,11 @@ function workspaceLocation(workspace: Workspace): string[] {
 		const match = /^gitdir: (.+)\n?$/.exec(readFileSync(file, "utf8"));
 		if (!match || realpathSync(resolve(workspace.path, match[1])) !== workspace.gitDir)
 			throw new Error();
-		return [`--git-dir=${workspace.gitDir}`, `--work-tree=${workspace.path}`];
 	} catch {
 		throw new Error("Worktree Git metadata changed or unavailable; inspect the worktree manually");
 	}
+	refuseNestedRepositories(workspace.path);
+	return [`--git-dir=${workspace.gitDir}`, `--work-tree=${workspace.path}`];
 }
 export function createWorkspace(
 	cwd: string,
@@ -215,7 +243,8 @@ export function inspectWorkspace(workspace: Workspace): string[] {
 		if (git(workspace.path, ["branch", "--show-current"]) !== workspace.branch)
 			notes.push("Task branch changed; inspect manually before recovery.");
 		return notes;
-	} catch {
+	} catch (error) {
+		if (error instanceof Error && error.message === nestedRepositoryMessage) return [error.message];
 		return [
 			"Worktree Git metadata changed or unavailable. Inspect the worktree manually; files retained.",
 		];
