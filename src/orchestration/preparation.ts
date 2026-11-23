@@ -1,3 +1,4 @@
+import { gitMetadataName } from "./path-policy.ts";
 import {
 	existsSync,
 	mkdirSync,
@@ -61,8 +62,9 @@ export function worktreeReadiness(cwd: string): Prerequisite[] {
 	return checks;
 }
 function denied(name: string): boolean {
-	return /^(\.(env|git|poly|aws|ssh|claude|codex|npmrc|pypirc|netrc)(\.|$)|.*\.(pem|key|p12)$)/i.test(
-		name,
+	return (
+		gitMetadataName(name) ||
+		/^(\.(env|poly|aws|ssh|claude|codex|npmrc|pypirc|netrc)(\.|$)|.*\.(pem|key|p12)$)/i.test(name)
 	);
 }
 /** Import only dependency artifacts. No executable installer, network, external symlink, or credential file. */

@@ -1,5 +1,6 @@
 import { git } from "./worktrees.ts";
 import { reviewDiffView } from "./review-view.ts";
+import { gitMetadataName } from "./path-policy.ts";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -23,7 +24,11 @@ export function scopedPath(root: string, path: string): string {
 		!rel ||
 		rel.startsWith("..") ||
 		isAbsolute(rel) ||
-		rel.split("/").some((part) => /^\.(git|poly|env|aws|claude|codex|ssh)(\.|$)/.test(part))
+		rel
+			.split("/")
+			.some(
+				(part) => gitMetadataName(part) || /^\.(poly|env|aws|claude|codex|ssh)(\.|$)/i.test(part),
+			)
 	)
 		throw new Error("Worker path is outside approved source context");
 	let current = target;

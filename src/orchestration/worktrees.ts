@@ -18,6 +18,7 @@ import { StringDecoder } from "node:string_decoder";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assertSafeProfile } from "../profile.ts";
 import { reviewDiffView } from "./review-view.ts";
+import { gitMetadataName } from "./path-policy.ts";
 
 const pinnedWorkspaces = new Map<string, Workspace>();
 const taskDirectories = new Set<string>();
@@ -136,8 +137,8 @@ const nestedRepositoryMessage =
 	"Worktree contains a nested repository; inspect the worktree manually";
 function refuseNestedRepositories(root: string, directory = root): void {
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
-		if (entry.name === ".git") {
-			if (directory === root) continue;
+		if (gitMetadataName(entry.name)) {
+			if (directory === root && entry.name === ".git") continue;
 			throw new Error(nestedRepositoryMessage);
 		}
 		if (entry.isDirectory()) refuseNestedRepositories(root, join(directory, entry.name));
