@@ -27,10 +27,8 @@ export function scopedPath(root: string, path: string): string {
 		throw new Error("Worker path is outside approved source context");
 	let current = target;
 	while (current !== canonical) {
-		if (
-			existsSync(current) &&
-			(lstatSync(current).isSymbolicLink() || realpathSync(current) !== current)
-		)
+		const status = lstatSync(current, { throwIfNoEntry: false });
+		if (status && (status.isSymbolicLink() || realpathSync(current) !== current))
 			throw new Error("Worker symlink access refused");
 		current = dirname(current);
 	}
@@ -45,6 +43,8 @@ export function scopedTools(cwd: string, editing: boolean): ToolDefinition[] {
 		...tool,
 		execute: async (id: string, args: any, signal: AbortSignal | undefined, update: any) => {
 			const path = scopedPath(cwd, args.path);
+			if (tool.name === "read" && !lstatSync(path).isFile())
+				throw new Error("Worker read requires an existing regular file");
 			assertNoSecrets(args);
 			const result = await tool.execute(id, { ...args, path }, signal, update);
 			assertNoSecrets(result);

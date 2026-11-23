@@ -120,6 +120,8 @@ export function createPiRunner(
 			tools: selected.map((t) => t.name),
 			customTools: selected,
 		});
+		// Commands must settle before file access can inspect their resulting filesystem state.
+		session.agent.toolExecution = "sequential";
 		const abort = () => {
 			void session.abort().catch(() => {});
 		};
