@@ -618,6 +618,7 @@ function reviewContext(input: Dispatch, review?: Task): string {
 		[],
 		Math.min(limit, REVIEW_CONTEXT_BUDGET),
 	);
+	if (!view) return context;
 	if (!context.includes(view))
 		throw new Error(
 			"Approved context is missing the required review view; reopen the context editor and retain it unchanged",

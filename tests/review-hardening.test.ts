@@ -50,6 +50,21 @@ test("renamed control files remain named in the canonical changed-file list", as
 	}
 });
 
+test("empty task diffs reach the normal no-source-diff message", async () => {
+	const host = await reviewedProject(() => {});
+	try {
+		assert.equal(
+			workspaceDiff(host.builder.workspace).diff,
+			"",
+			"An empty change must produce an empty view",
+		);
+		await host.commands.get("task").handler(`${host.builder.id} diff`, host.ctx);
+		assert.ok(host.notices.includes("No source diff."));
+	} finally {
+		await host.close();
+	}
+});
+
 test("review_diff directory requests cannot reveal sensitive filenames", async () => {
 	const host = await reviewedProject((task) => {
 		mkdirSync(join(task.workspace.path, "config"));

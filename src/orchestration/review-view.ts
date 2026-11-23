@@ -16,6 +16,11 @@ interface FileStat {
 	added: string;
 	removed: string;
 }
+function diffArguments(base: string, revision: string, paths: string[]): string[] {
+	if (!/^[a-f0-9]{40,64}$/.test(base) || (revision && !/^[a-f0-9]{40,64}$/.test(revision)))
+		throw new Error("Invalid review revision");
+	return [...reviewDiffOptions, base, ...(revision ? [revision] : []), "--", ...paths];
+}
 
 export function reviewFileIndex(cwd: string, options: string[]): FileStat[] {
 	const records: FileStat[] = [];
@@ -44,15 +49,7 @@ function filePatch(
 		fits = true;
 	readGitOutput(
 		cwd,
-		[
-			"--literal-pathspecs",
-			"diff",
-			...reviewDiffOptions,
-			base,
-			...(revision ? [revision] : []),
-			"--",
-			file,
-		],
+		["--literal-pathspecs", "diff", ...diffArguments(base, revision, [file])],
 		(chunk) => {
 			if (raw.length + chunk.length > budget) {
 				fits = false;
@@ -158,10 +155,9 @@ export function reviewDiffView(
 	budget = 48000,
 	selection: ViewSelection = {},
 ): string {
-	if (!/^[a-f0-9]{40,64}$/.test(base) || (revision && !/^[a-f0-9]{40,64}$/.test(revision)))
-		throw new Error("Invalid review revision");
-	const options = [...reviewDiffOptions, base, ...(revision ? [revision] : []), "--", ...paths];
+	const options = diffArguments(base, revision, paths);
 	const records = selectedRecords(cwd, options, selection);
+	if (!records.length) return "";
 	const commands = inspectionCommands(cwd, base, revision);
 	const header = `${controlNotice(records)}${renderReviewDiff("")}Base: ${base}\nRevision: ${revision || "uncommitted worktree"}\nChanged-file index. Entries marked not shown have no patch in this view.\n`;
 	const footer = `\nList every changed file:\n${commands.index}\nInspect the full committed diff:\n${commands.patch}`;
