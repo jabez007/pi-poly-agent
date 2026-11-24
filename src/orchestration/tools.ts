@@ -14,17 +14,19 @@ import {
 import { assertNoSecrets } from "../memory.ts";
 
 const sourcePathMessage = "Worker path is outside approved source context";
-function sourceStatus(path: string) {
+function sourceFilesystem<T>(operation: () => T): T {
 	try {
-		return lstatSync(path, { throwIfNoEntry: false });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOTDIR") throw new Error(sourcePathMessage);
-		throw error;
+		return operation();
+	} catch {
+		throw new Error(sourcePathMessage);
 	}
+}
+function sourceStatus(path: string) {
+	return sourceFilesystem(() => lstatSync(path, { throwIfNoEntry: false }));
 }
 
 export function scopedPath(root: string, path: string): string {
-	const canonical = realpathSync(root);
+	const canonical = sourceFilesystem(() => realpathSync(root));
 	const target = resolve(root, path);
 	// Pi must receive the same absolute path that passes the source-context check.
 	if (/^[@~]|^file:/i.test(path) || pathHasUnicodeSpace(target))
@@ -34,7 +36,10 @@ export function scopedPath(root: string, path: string): string {
 	let current = target;
 	while (current !== canonical) {
 		const status = sourceStatus(current);
-		if (status && (status.isSymbolicLink() || realpathSync(current) !== current))
+		if (
+			status &&
+			(status.isSymbolicLink() || sourceFilesystem(() => realpathSync(current)) !== current)
+		)
 			throw new Error("Worker symlink access refused");
 		current = dirname(current);
 	}
@@ -49,10 +54,14 @@ export function scopedTools(cwd: string, editing: boolean): ToolDefinition[] {
 		...tool,
 		execute: async (id: string, args: any, signal: AbortSignal | undefined, update: any) => {
 			const path = scopedPath(cwd, args.path);
-			if (tool.name === "read" && !lstatSync(path).isFile())
-				throw new Error("Worker read requires an existing regular file");
+			if (tool.name === "read" && !sourceStatus(path)?.isFile()) throw new Error(sourcePathMessage);
 			assertNoSecrets(args);
-			const result = await tool.execute(id, { ...args, path }, signal, update);
+			let result;
+			try {
+				result = await tool.execute(id, { ...args, path }, signal, update);
+			} catch {
+				throw new Error(sourcePathMessage);
+			}
 			assertNoSecrets(result);
 			return result;
 		},
@@ -194,6 +203,17 @@ export function testTool(cwd: string, approve: ApproveTest, tests: string[]): To
 	};
 }
 
+/** Preserve local policy diagnostics while withholding native I/O details. */
+function sourceResult<T>(operation: () => T): T {
+	try {
+		return operation();
+	} catch (error) {
+		if (error && typeof error === "object" && ("syscall" in error || "path" in error))
+			throw new Error(sourcePathMessage);
+		throw error;
+	}
+}
+
 export function diffTool(cwd: string, base: string): ToolDefinition {
 	return {
 		name: "review_diff",
@@ -204,27 +224,28 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			path: Type.String(),
 			offset: Type.Optional(Type.Integer({ minimum: 0 })),
 		}),
-		execute: async (_id, args: any) => {
-			const indexOnly = args.path === ".";
-			const path = indexOnly ? undefined : scopedPath(cwd, args.path);
-			if (path && sourceStatus(path)?.isDirectory()) throw new Error(literalFileMessage);
-			if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
-			if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
-				throw new Error("Invalid review file offset");
-			const rendered = reviewDiffView(
-				cwd,
-				base,
-				git(cwd, ["rev-parse", "HEAD"]),
-				path ? [path] : [],
-				48000,
-				{
-					offset: args.offset,
-					indexOnly,
-					exactPath: path ? relative(cwd, path) : undefined,
-				},
-			);
-			assertNoSecrets(rendered);
-			return { content: [{ type: "text", text: rendered }], details: { base } };
-		},
+		execute: async (_id, args: any) =>
+			sourceResult(() => {
+				const indexOnly = args.path === ".";
+				const path = indexOnly ? undefined : scopedPath(cwd, args.path);
+				if (path && sourceStatus(path)?.isDirectory()) throw new Error(literalFileMessage);
+				if (!/^[a-f0-9]{40,64}$/.test(base)) throw new Error("Invalid review base");
+				if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0))
+					throw new Error("Invalid review file offset");
+				const rendered = reviewDiffView(
+					cwd,
+					base,
+					git(cwd, ["rev-parse", "HEAD"]),
+					path ? [path] : [],
+					48000,
+					{
+						offset: args.offset,
+						indexOnly,
+						exactPath: path ? relative(cwd, path) : undefined,
+					},
+				);
+				assertNoSecrets(rendered);
+				return { content: [{ type: "text", text: rendered }], details: { base } };
+			}),
 	};
 }

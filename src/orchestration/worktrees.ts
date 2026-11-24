@@ -204,12 +204,16 @@ function submoduleSafeArgs(args: string[], task: boolean): string[] {
 const nestedRepositoryMessage =
 	"Worktree contains a nested repository; inspect the worktree manually";
 function refuseNestedRepositories(root: string, directory = root): void {
-	for (const entry of readdirSync(directory, { withFileTypes: true })) {
-		if (gitMetadataName(entry.name)) {
-			if (directory === root && entry.name === ".git") continue;
-			throw new Error(nestedRepositoryMessage);
+	try {
+		for (const entry of readdirSync(directory, { withFileTypes: true })) {
+			if (gitMetadataName(entry.name)) {
+				if (directory === root && entry.name === ".git") continue;
+				throw new Error(nestedRepositoryMessage);
+			}
+			if (entry.isDirectory()) refuseNestedRepositories(root, join(directory, entry.name));
 		}
-		if (entry.isDirectory()) refuseNestedRepositories(root, join(directory, entry.name));
+	} catch {
+		throw new Error(nestedRepositoryMessage);
 	}
 }
 export interface Workspace {

@@ -53,7 +53,7 @@ test("real worker read preserves existing content and refuses a missing file", a
 	);
 	await assert.rejects(
 		read.execute("fixture", { path: "missing.txt" }, undefined, undefined, {} as any),
-		/ENOENT|exist|missing/i,
+		(error: Error) => error.message === "Worker path is outside approved source context",
 	);
 });
 
