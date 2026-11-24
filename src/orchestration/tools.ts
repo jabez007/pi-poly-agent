@@ -1,8 +1,10 @@
 import { git } from "./worktrees.ts";
 import { reviewDiffView } from "./review-view.ts";
 import { literalFileMessage, pathHasUnicodeSpace, sourcePathAllowed } from "./path-policy.ts";
+import { ReviewBudgetError } from "./errors.ts";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import {
@@ -23,6 +25,29 @@ function sourceFilesystem<T>(operation: () => T): T {
 }
 function sourceStatus(path: string) {
 	return sourceFilesystem(() => lstatSync(path, { throwIfNoEntry: false }));
+}
+
+function replaceSourcePath(message: string, path: string, replacement: string): string {
+	return message.replaceAll(path, (match, offset: number) => {
+		const next = message[offset + match.length];
+		return !next || /[/\s"'.,:;()]/.test(next) ? replacement : match;
+	});
+}
+
+/** Retain actionable diagnostics without exposing host paths or native I/O details. */
+function sourceError(error: unknown, cwd: string, path?: string): Error {
+	// This local error's constructor accepts numeric metadata, never native I/O details.
+	if (error instanceof ReviewBudgetError)
+		return new ReviewBudgetError(error.required, error.budget, error.scope);
+	if (!(error instanceof Error) || "code" in error || "syscall" in error || "path" in error)
+		return new Error(sourcePathMessage);
+	const roots = [...new Set([cwd, resolve(cwd), sourceFilesystem(() => realpathSync(cwd))])];
+	let message = path ? replaceSourcePath(error.message, path, relative(cwd, path)) : error.message;
+	for (const root of roots.sort((a, b) => b.length - a.length))
+		message = replaceSourcePath(message, root, ".");
+	if ([...roots, homedir()].some((root) => message.includes(root)))
+		return new Error(sourcePathMessage);
+	return message === error.message ? error : new Error(message);
 }
 
 export function scopedPath(root: string, path: string): string {
@@ -59,8 +84,8 @@ export function scopedTools(cwd: string, editing: boolean): ToolDefinition[] {
 			let result;
 			try {
 				result = await tool.execute(id, { ...args, path }, signal, update);
-			} catch {
-				throw new Error(sourcePathMessage);
+			} catch (error) {
+				throw sourceError(error, cwd, path);
 			}
 			assertNoSecrets(result);
 			return result;
@@ -204,13 +229,11 @@ export function testTool(cwd: string, approve: ApproveTest, tests: string[]): To
 }
 
 /** Preserve local policy diagnostics while withholding native I/O details. */
-function sourceResult<T>(operation: () => T): T {
+function sourceResult<T>(cwd: string, operation: () => T): T {
 	try {
 		return operation();
 	} catch (error) {
-		if (error && typeof error === "object" && ("syscall" in error || "path" in error))
-			throw new Error(sourcePathMessage);
-		throw error;
+		throw sourceError(error, cwd);
 	}
 }
 
@@ -225,7 +248,7 @@ export function diffTool(cwd: string, base: string): ToolDefinition {
 			offset: Type.Optional(Type.Integer({ minimum: 0 })),
 		}),
 		execute: async (_id, args: any) =>
-			sourceResult(() => {
+			sourceResult(cwd, () => {
 				const indexOnly = args.path === ".";
 				const path = indexOnly ? undefined : scopedPath(cwd, args.path);
 				if (path && sourceStatus(path)?.isDirectory()) throw new Error(literalFileMessage);
