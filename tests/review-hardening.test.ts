@@ -65,7 +65,7 @@ test("empty task diffs reach the normal no-source-diff message", async () => {
 	}
 });
 
-test("review_diff directory requests cannot reveal sensitive filenames", async () => {
+test("review_diff refuses directory patches and lists refused filenames without their content", async () => {
 	const host = await reviewedProject((task) => {
 		mkdirSync(join(task.workspace.path, "config"));
 		writeFileSync(join(task.workspace.path, "config/.env"), "private fixture note\n");
@@ -130,7 +130,7 @@ test("integration preview preserves the reviewer's approved visibility limits", 
 	}
 });
 
-test("all invisible and default-ignorable code points are escaped in every review view", async () => {
+test("listed invisible characters are escaped in artifacts, packets, tool output and previews", async () => {
 	const points = [
 		0x034f,
 		0x115f,

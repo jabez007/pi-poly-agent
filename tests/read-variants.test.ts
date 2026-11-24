@@ -41,7 +41,7 @@ for (const [name, plain, variant] of [
 	});
 }
 
-test("real worker read preserves existing files and reports missing files", async () => {
+test("real worker read preserves existing content and refuses a missing file", async () => {
 	const root = mkdtempSync(join(tmpdir(), "poly-read-ordinary-"));
 	writeFileSync(join(root, "app.txt"), "ordinary fixture\n");
 	const read = scopedTools(root, false)[0];

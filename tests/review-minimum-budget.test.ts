@@ -11,7 +11,7 @@ import { reviewDiffView } from "../src/orchestration/review-view.ts";
 import { temporaryRepository } from "./fixtures/review-project.ts";
 
 for (const count of [1, 60]) {
-	test(`required review size is exact for ${count} changed files`, async () => {
+	test(`minimum review budget is exact with ${count} changed paths`, async () => {
 		const { root, directory } = temporaryRepository();
 		const roles = defaultRoles();
 		const manager = new TaskManager(

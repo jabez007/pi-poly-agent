@@ -19,7 +19,7 @@ const actions = [
 	"menu-integrate",
 ];
 for (const action of actions) {
-	test(`${action} waits for preparation and works after it settles`, async () => {
+	test(`${action} refuses during preparation and works after it settles`, async () => {
 		let fail = false;
 		const host = await reviewedProject((task) => {
 			if (fail) throw new Error("Fixture worker failure");
@@ -72,7 +72,7 @@ for (const action of actions) {
 			await assert.rejects(
 				invoke(),
 				/Task preparation is active/,
-				"Every source-inspecting task action must wait for its preparation",
+				"Every source-inspecting task action must refuse during preparation",
 			);
 			assert.throws(
 				() => workspaceDiff(target.workspace),

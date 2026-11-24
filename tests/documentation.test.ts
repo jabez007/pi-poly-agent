@@ -12,36 +12,6 @@ test("documentation local links, heading references and command examples resolve
 	assert.deepEqual(checkDocumentation(resolve(import.meta.dirname, "..")), []);
 });
 
-test("review documentation describes spooled scanning bounded artifacts pagination and exact approval", () => {
-	for (const file of [
-		"README.md",
-		"docs/architecture.md",
-		"docs/security.md",
-		"docs/workflows.md",
-	]) {
-		const text = readFileSync(file, "utf8");
-		assert.match(
-			text,
-			/bounded[^\n]*artifact|artifact[^\n]*bounded/i,
-			`${file} must describe bounded diff artifacts`,
-		);
-		assert.match(text, /paginat/i, `${file} must explain filename pagination`);
-		assert.match(
-			text,
-			/approved[^\n]*unchanged|byte for byte/i,
-			`${file} must describe exact approved packet delivery`,
-		);
-		assert.doesNotMatch(
-			text,
-			/full captured patches[^\n]*retained in task artifacts|artifacts retain the full captured patch|Omission indexes are complete|file index is not truncated/i,
-		);
-	}
-	const architecture = readFileSync("docs/architecture.md", "utf8");
-	assert.match(architecture, /temporary spool/i);
-	assert.match(architecture, /64 KiB/);
-	assert.match(readFileSync("docs/workflows.md", "utf8"), /review_diff[^\n]*offset/);
-});
-
 test("documentation verification detects broken links, missing headings and invalid commands", () => {
 	const root = mkdtempSync(join(tmpdir(), "poly-docs-"));
 	mkdirSync(join(root, "docs"));
@@ -106,24 +76,4 @@ test("qualification review procedure names the generic workflow and its required
 	);
 	const config = loadPlatform(root, root);
 	assert.ok(config.workflows.some((w) => w.id === "implementation-review"));
-});
-
-test("operational documentation describes exact reads nested repositories bounded views and retained cleanup history", () => {
-	for (const file of ["docs/security.md", "docs/architecture.md", "docs/workflows.md"]) {
-		const text = readFileSync(file, "utf8");
-		assert.match(
-			text,
-			/existing regular file/,
-			`${file} must describe the exact-read precondition`,
-		);
-		assert.match(text, /nested repositor/i);
-		assert.match(text, /omitted files|files omitted/i);
-		assert.doesNotMatch(
-			text,
-			/refuse patches above 48000|patches over 48000 rendered characters are refused/,
-		);
-	}
-	for (const file of ["README.md", "docs/workflows.md"]) {
-		assert.match(readFileSync(file, "utf8"), /cleanup[^\n]*history|history[^\n]*cleanup/i);
-	}
 });

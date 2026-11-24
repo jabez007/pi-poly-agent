@@ -13,7 +13,7 @@ import { defaultPolicy } from "../src/policy.ts";
 import { temporaryRepository } from "./fixtures/review-project.ts";
 import { nestedRepository } from "./fixtures/nested-repository.ts";
 
-test("a 600-file review uses one walk and a constant number of Git queries", () => {
+test("a 600-file review uses one worktree walk and at most four Git queries", () => {
 	const { root, directory } = temporaryRepository();
 	const workspace = createWorkspace(root, directory, "fixture");
 	fs.mkdirSync(join(workspace.path, "src"));
@@ -116,7 +116,7 @@ test("view checks expire before subsequent nested repository changes", async () 
 	assert.equal(fs.existsSync(marker), false);
 });
 
-test("streamed patches retain Unicode separators and split astral code points", async () => {
+test("streamed patch views retain logic and Unicode escapes across chunk boundaries", async () => {
 	const { root, directory } = temporaryRepository();
 	const workspace = createWorkspace(root, directory, "fixture");
 	const tag = String.fromCodePoint(0xe0001);

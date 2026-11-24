@@ -11,7 +11,7 @@ import { git } from "../src/orchestration/worktrees.ts";
 import { temporaryRepository } from "./fixtures/review-project.ts";
 
 for (const state of ["deleted", "replaced", "existing"]) {
-	test(`review_diff refuses a ${state} directory and protects its refused descendants`, async () => {
+	test(`review_diff refuses ${state} directory paths and excludes refused descendants`, async () => {
 		const { root, directory } = temporaryRepository();
 		mkdirSync(join(root, "config"));
 		writeFileSync(join(root, "config/.env"), "private fixture note\n");
