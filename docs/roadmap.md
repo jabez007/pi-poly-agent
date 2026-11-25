@@ -17,7 +17,7 @@ Pi remains the resource platform. Pi Poly Agent adds provider eligibility, bound
 
 ## Current limits
 
-- No provider has been live-qualified in automated checks. Claude subscription workers remain blocked; Google consumer ACP remains direct-only.
+- No provider has been live-qualified in automated checks. Claude defaults to native-code ACP with an explicit bridge alternative; both remain locked until reviewed activation and are blocked from workers. Claude ACP and Google consumer ACP require direct human input.
 - Parent extensions are trusted application code. Arbitrary native extensions cannot run inside a restricted worker. Custom worker tools/provider factories still require reviewed application-code adapters; metadata is not a JavaScript sandbox.
 - Existing suppressed executable resources require explicit trust acknowledgment. Project trust remains native. `models.json`, proxy overrides, automatic project trust, turn retries, compaction, and cache warming remain restricted in the managed profile.
 - Workflow continuation is explicit and creates a linked run. Completed tasks are reused only after validation. Uncertain workers need explicit task recovery; ambiguous legacy dispatches require manual reconciliation. No provider request or completed tool operation is automatically replayed.
@@ -31,7 +31,7 @@ Avoid building a generic plugin runtime, competing extension/skill formats, an o
 
 Native package/resource fixtures, generic recipes, durable recovery and centrally restricted workers are ready for wider offline testing. Executable integrations now default to directory review; entry-only approvals require an explicit acknowledgment of unverified imports. Neither mode attests imports outside its recorded scope or sandboxes trusted application code.
 
-Wider live-use claims remain blocked on explicitly authorized Codex, Kimi, Z.AI and real compatible-endpoint qualification. Claude account authorization remains unresolved and its workers remain disabled. Google requires its existing activation review and direct interactive qualification; consumer ACP workers remain forbidden. A successful fixture or CI run cannot remove those blockers.
+Wider live-use claims remain blocked on explicitly authorized Codex, Kimi, Z.AI and real compatible-endpoint qualification. Neither Claude mode has integration-specific provider approval or live qualification, and both remain disabled for workers. Google requires its existing activation review and direct interactive qualification; consumer ACP workers remain forbidden. A successful fixture or CI run cannot remove those blockers.
 
 The next priorities are maintained native package and authorized provider qualification, terminal recovery acceptance, and reproducible release/upgrade verification. Supporting-file snapshots, template arguments and provider-private worker session continuation can wait. No new scheduler or extension runtime is needed.
 

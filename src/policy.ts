@@ -2,6 +2,8 @@ import type { Provider } from "@earendil-works/pi-ai";
 
 export const NATIVE_PROVIDERS = ["openai-codex", "kimi-coding", "zai"] as const;
 export const BRIDGE_PROVIDER = "claude-bridge";
+export const CLAUDE_ACP_PROVIDER = "claude-acp";
+export const CLAUDE_REVIEW_REVISION = "2026-11-25.1";
 export const ACP_PROVIDER = "antigravity-acp";
 export const POLICY_REVISION = "2026-11-21.1";
 
@@ -14,7 +16,7 @@ export interface Activation {
 
 export interface Policy {
 	version: 1;
-	claude: Activation;
+	claude: Activation & { mode?: "acp" | "bridge" };
 	google: Activation;
 	kimiApiKey: boolean;
 	zaiCodingPlan: boolean;
@@ -38,7 +40,14 @@ export function providerStatus(provider: string, policy: Policy): string {
 		"openai-codex": "ChatGPT OAuth",
 		"kimi-coding": policy.kimiApiKey ? "Kimi plan OAuth/key" : "Kimi plan OAuth",
 		zai: policy.zaiCodingPlan ? "Z.AI coding-plan key" : "coding-plan key locked",
-		[BRIDGE_PROVIDER]: policy.claude.enabled ? "native Claude auth" : "Claude auth locked",
+		[BRIDGE_PROVIDER]:
+			policy.claude.enabled && claudeMode(policy) === "bridge"
+				? "native Claude auth, Pi tools"
+				: "Claude bridge locked or unselected",
+		[CLAUDE_ACP_PROVIDER]:
+			policy.claude.enabled && claudeMode(policy) === "acp"
+				? "native Claude auth, direct user only"
+				: "Claude ACP locked or unselected",
 		[ACP_PROVIDER]: policy.google.enabled
 			? "personal OAuth, direct user only"
 			: "Google auth locked",
@@ -49,7 +58,9 @@ export function providerStatus(provider: string, policy: Policy): string {
 export function validatePolicy(value: unknown): Policy {
 	const p = value as Policy;
 	if (!p || p.version !== 1) throw new Error("Unsupported profile policy");
-	validateActivation(p.claude);
+	validateActivation(p.claude, CLAUDE_REVIEW_REVISION);
+	if (p.claude.mode !== undefined && !["acp", "bridge"].includes(p.claude.mode))
+		throw new Error("Claude mode must be acp or bridge");
 	validateActivation(p.google);
 	if (typeof p.kimiApiKey !== "boolean" || typeof p.zaiCodingPlan !== "boolean") {
 		throw new Error("Coding-plan acknowledgements must be boolean");
@@ -66,14 +77,14 @@ export function validatePolicy(value: unknown): Policy {
 	return p;
 }
 
-function validateActivation(a: Activation): void {
+function validateActivation(a: Activation, revision = POLICY_REVISION): void {
 	if (!a || typeof a.enabled !== "boolean") throw new Error("Invalid activation policy");
 	if (![a.review, a.runtime, a.sha256].every((v) => typeof v === "string")) {
 		throw new Error("Invalid runtime attestation");
 	}
 	if (
 		a.enabled &&
-		(a.review !== POLICY_REVISION || !a.runtime.startsWith("/") || !/^[a-f0-9]{64}$/.test(a.sha256))
+		(a.review !== revision || !a.runtime.startsWith("/") || !/^[a-f0-9]{64}$/.test(a.sha256))
 	) {
 		throw new Error("Activation needs a current review and an absolute, checksum-pinned runtime");
 	}
@@ -127,9 +138,8 @@ export function assertRequest(provider: string, policy: Policy, direct = false):
 			);
 		return;
 	}
-	if (provider === BRIDGE_PROVIDER) {
-		if (!policy.claude.enabled)
-			throw new Error("Claude subscription integration is locked pending authorization review");
+	if (isClaudeProvider(provider)) {
+		assertClaudeRequest(provider, policy, direct);
 		return;
 	}
 	if (!NATIVE_PROVIDERS.includes(provider as (typeof NATIVE_PROVIDERS)[number])) {
@@ -137,6 +147,26 @@ export function assertRequest(provider: string, policy: Policy, direct = false):
 	}
 	if (provider === "zai" && !policy.zaiCodingPlan)
 		throw new Error("Z.AI requires explicit coding-plan opt-in");
+}
+
+export function claudeMode(policy: Policy): "acp" | "bridge" {
+	return policy.claude.mode ?? "acp";
+}
+
+export function isClaudeProvider(provider: string): boolean {
+	return provider === BRIDGE_PROVIDER || provider === CLAUDE_ACP_PROVIDER;
+}
+
+function assertClaudeRequest(provider: string, policy: Policy, direct: boolean): void {
+	if (!policy.claude.enabled)
+		throw new Error("Claude subscription integration is locked pending authorization review");
+	validateActivation(policy.claude, CLAUDE_REVIEW_REVISION);
+	const selected = claudeMode(policy) === "acp" ? CLAUDE_ACP_PROVIDER : BRIDGE_PROVIDER;
+	if (provider !== selected) throw new Error("Claude mode is not selected in policy");
+	if (provider === CLAUDE_ACP_PROVIDER && !direct)
+		throw new Error(
+			"Claude ACP requires a direct interactive user prompt; delegation is forbidden",
+		);
 }
 
 export function guardedProvider(provider: Provider, check: () => void): Provider {

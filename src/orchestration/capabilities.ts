@@ -1,4 +1,10 @@
-import { ACP_PROVIDER, BRIDGE_PROVIDER, assertRequest, type Policy } from "../policy.ts";
+import {
+	ACP_PROVIDER,
+	BRIDGE_PROVIDER,
+	CLAUDE_ACP_PROVIDER,
+	assertRequest,
+	type Policy,
+} from "../policy.ts";
 
 export interface Capabilities {
 	direct: boolean;
@@ -57,5 +63,6 @@ export const MANAGED_PROVIDERS = [
 	"kimi-coding",
 	"zai",
 	BRIDGE_PROVIDER,
+	CLAUDE_ACP_PROVIDER,
 	ACP_PROVIDER,
 ];

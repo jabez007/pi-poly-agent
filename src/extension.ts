@@ -9,6 +9,8 @@ import { focusedContext } from "./orchestration/context.ts";
 import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
 import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
+import { registerClaudeAcp } from "./providers/claude-acp-extension.ts";
+import { CLAUDE_ACP_PROVIDER, claudeMode } from "./policy.ts";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
 	ExtensionAPI,
@@ -122,7 +124,12 @@ export default async function polyExtension(
 
 	registerInstanceProviders(pi, providers);
 
-	await registerClaudeBridge(pi, profile, policy.claude, () => check(BRIDGE_PROVIDER));
+	await registerClaudeBridge(
+		pi,
+		profile,
+		{ ...policy.claude, enabled: policy.claude.enabled && claudeMode(policy) === "bridge" },
+		() => check(BRIDGE_PROVIDER),
+	);
 
 	const googleConfig = (
 		models = [
@@ -264,7 +271,8 @@ export default async function polyExtension(
 					"openai-codex: native ChatGPT OAuth",
 					`kimi-coding: native OAuth${policy.kimiApiKey ? " or explicitly allowed coding-plan key" : " only"}`,
 					`zai: coding-plan key ${policy.zaiCodingPlan ? "allowed" : "locked"}`,
-					`claude-bridge: official SDK ${policy.claude.enabled ? "activated, live unverified" : "locked, authorization unresolved"}`,
+					`claude-acp: native Claude Code, direct user only, ${policy.claude.enabled && claudeMode(policy) === "acp" ? "activated, live unverified" : "locked or unselected"}`,
+					`claude-bridge: official SDK ${policy.claude.enabled && claudeMode(policy) === "bridge" ? "activated, live unverified" : "locked, authorization unresolved"}`,
 					`antigravity-acp: direct user only, ${policy.google.enabled ? "activated, live unverified" : "locked"}`,
 					`memory: ${memoryEnabled ? "enabled" : "optional, disabled"}`,
 				].join("\n"),
@@ -429,7 +437,7 @@ export default async function polyExtension(
 		);
 		if (!allowed) {
 			context.ui.notify(
-				"Compaction canceled. Prepare /handoff and enable MemPalace for an explicit checkpoint. Google ACP and automatic recovery compaction remain disabled.",
+				"Compaction canceled. Prepare /handoff and enable MemPalace for an explicit checkpoint. Direct-only ACP and automatic recovery compaction remain disabled.",
 				"warning",
 			);
 			return { cancel: true };
@@ -467,13 +475,22 @@ export default async function polyExtension(
 		await memoryTransport?.close();
 		await contexts.close();
 	});
+	registerClaudeAcp(pi, profile);
 }
 
 function registerInstanceProviders(pi: ExtensionAPI, providers: ProviderRegistry): void {
 	for (const instance of providers
 		.list()
 		.filter(
-			(p) => !["openai-codex", "kimi-coding", "zai", BRIDGE_PROVIDER, ACP_PROVIDER].includes(p.id),
+			(p) =>
+				![
+					"openai-codex",
+					"kimi-coding",
+					"zai",
+					BRIDGE_PROVIDER,
+					CLAUDE_ACP_PROVIDER,
+					ACP_PROVIDER,
+				].includes(p.id),
 		)) {
 		if (instance.enabled) pi.registerProvider(providers.provider(instance.id, true));
 	}

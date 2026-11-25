@@ -253,7 +253,7 @@ export async function checkpointBeforeCompaction(
 		!input.manual ||
 		input.willRetry ||
 		!input.interactive ||
-		input.provider === "antigravity-acp" ||
+		["antigravity-acp", "claude-acp"].includes(input.provider) ||
 		!input.memoryEnabled ||
 		!input.handoff
 	)

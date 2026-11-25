@@ -6,11 +6,15 @@ Assessment date: November 21, 2026. No Anthropic or Google account was authentic
 
 For current v0.5 observations, see [qualification evidence](qualification.md#v05-provider-and-orchestration-evidence). Doctor is read-only; its capability report is not proof of valid authentication. `/poly-qualify` is an explicitly approved, one-generation tool-free worker request for eligible providers only. It cannot activate Claude/Google workers, change billing or silently continue after its budget. Offline self-development fixtures use no account credentials. The established provider, sandbox and integration trust rules below remain in force.
 
-The default policy locks Claude and Google. Their real runtime paths require explicit activation, the current review revision, an absolute executable path, and a matching SHA-256 digest. The Google discovery command also asks the user before starting the runtime. Pi startup runs offline. No installer or CI job starts either runtime.
+The default policy locks Claude and Google. Their real runtime paths require explicit activation, the current review revision, an absolute executable path, and a matching SHA-256 digest. Google and Claude ACP discovery commands ask the user before starting their runtimes. While both integrations are locked, Pi startup initializes neither subscription runtime. No installer or CI job starts Claude Code, Claude ACP or Antigravity.
 
-Anthropic's application-authentication distinction remains unresolved for this personal SDK frontend. The official documentation permits native sign-in under stated conditions and separately restricts third-party subscription authentication. Resolve that applicability before activating the bridge. See [Anthropic's legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance).
+Claude ACP is the default path and preserves native Claude Code tools, prompt and settings; the bridge is an explicit Pi-tool alternative. Both require user review and activation, which does not imply Anthropic approval. The native sign-in and third-party authentication conditions still require review for the intended use. See [Anthropic's legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance).
 
 Google's published clarification supports direct interaction through compatible ACP editors and prohibits external coding-agent delegation through consumer credentials, even with human approval. This implementation follows that distinction. See the [November 16 clarification](https://discuss.ai.google.dev/t/tos-clarification-is-human-supervised-codex-to-antigravity-acp-delegation-permitted/200697) and [official ACP documentation](https://antigravity.google/docs/ide/extensions/acp/).
+
+Claude ACP activation defaults to `claude.mode: "acp"`; `bridge` must be selected explicitly. Claude requires reapproval at revision `2026-11-25.1`, while Google's existing `2026-11-21.1` activation remains valid. ACP preflight checks Linux native settings for authentication, routing and starting-mode conflicts before launch and requests. Native settings remain trusted application configuration; preflight is not a sandbox or an atomic defense against concurrent changes by trusted host code.
+
+Claude ACP requires a native `default` permission default and a session reporting that starting mode. It allows only explicit advertised `default`, `plan` and `acceptEdits` selection. The child alone receives the attested `CLAUDE_CODE_EXECUTABLE`; inherited runtime overrides and adapter logging controls are refused. No client authentication or provider-routing RPC is sent, and runtime-reported non-subscription authentication fails closed. Both Claude modes remain ineligible for workers, and automatic compaction handoffs are disabled for Claude ACP as for Google ACP.
 
 ## Enforcement
 
@@ -39,13 +43,13 @@ Pattern screening cannot identify every confidential value or arbitrary secret. 
 
 ## Dependency and implementation assessment
 
-Pi, the Claude bridge, and their dependencies are installed with lifecycle scripts disabled by `.npmrc` and the documented `npm ci --ignore-scripts` command. The lockfile pins transitive versions and npm integrity hashes. The bridge pins its Agent SDK dependency. The repository does not vendor dependency packages or native runtimes. Bootstrap does not install or update Claude Code or Antigravity.
+Pi, both Claude adapters, and their dependencies are installed with lifecycle scripts disabled by `.npmrc` and the documented `npm ci --ignore-scripts` command. The lockfile pins transitive versions and npm integrity hashes. Each Claude adapter pins its own Agent SDK dependency. The repository does not vendor dependency packages or native runtimes. Bootstrap does not install or update Claude Code or Antigravity.
 
 GPL-3.0-or-later applies to this project's original source code. It does not relicense the Claude Agent SDK or other dependencies. The SDK remains subject to [Anthropic's license](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/LICENSE.md) and applicable terms. Review the licenses and distribution terms of included dependencies before publishing a bundled package, container image, or executable. Source publication and subscription activation are separate decisions.
 
-The source review checked dependency manifests and installed runtime source. The bridge's strict MCP configuration, environment propagation, native-settings loading, SDK options, and debug controls informed the safeguards. The ACP alternatives were reviewed and left uninstalled because their authentication management and orchestration behaviors were unnecessary here. See [the source inventory](architecture.md#reviewed-source-and-reuse-decisions).
+The source review checked dependency manifests and installed runtime source. The bridge's strict MCP configuration, environment propagation, native-settings loading, SDK options, and debug controls informed the safeguards. The pinned Claude ACP adapter now shares the existing ACP client and approval UI; other reviewed ACP extensions remain uninstalled. See [the source inventory](architecture.md#reviewed-source-and-reuse-decisions).
 
-Automated tests cover request authorization, mock streaming and cancellation, initialization failures, permission denial, secret-safe diagnostics, native sessions, project-scoped checkpoints, and installation preservation. They isolate HOME and auth directories before imports. The Claude SDK test replaces the upstream bridge's query seam and never spawns Claude Code.
+Automated tests cover request authorization, mock streaming and cancellation, initialization failures, permission denial, secret-safe diagnostics, native sessions, project-scoped checkpoints, and installation preservation. They isolate HOME and auth directories before imports. The bridge test replaces its SDK query seam; Claude ACP tests use mocked ports and a local protocol fixture, never either real Claude program.
 
 The initial npm advisory check identified a moderate development-tool chain through TypeScript ESLint and minimatch. The dependency was updated to `typescript-eslint@8.73.0`. Re-run `npm audit` when changing pins. The check is a snapshot, not a claim that dependencies are universally safe.
 
@@ -57,7 +61,7 @@ Gitleaks 8.30.1 reported no candidates in a filesystem scan of this checkout usi
 
 ## Limits and activation blockers
 
-1. Claude subscription authorization remains unresolved. Provider-side Extra Usage must also be reviewed. Disabling the bridge's long-context extra-usage option does not disable account-level overages.
+1. Neither Claude mode has live qualification or integration-specific Anthropic approval. Provider-side Extra Usage must also be reviewed. Disabling the bridge's long-context extra-usage option does not disable account-level overages.
 2. Google live compatibility, official runtime provenance, authentication, default-mode behavior, and model enumeration require an authorized interactive qualification. Install and review the official `agy` runtime before activation.
 3. Pi requires Node.js 22.19 or newer. `.nvmrc` pins the verified Node version. The launcher rejects older versions.
 4. The launcher rejects inherited API keys and other authentication overrides. Run `npm run validate` to identify conflicting variable names, then resolve them in the intended launch shell. Diagnostics never include their values.
@@ -66,7 +70,7 @@ Gitleaks 8.30.1 reported no candidates in a filesystem scan of this checkout usi
 
 ## v0.2 provider invocation and delegation
 
-The Claude stream wrapper now validates both `process.env` and `options.env` before upstream invocation. The same validator protects native provider streams and Google stream requests. Per-request overrides accept only locale, timezone, terminal, and color settings. Credential-supplied empty strings cannot remove a forbidden variable or change HOME, executable lookup, native storage, gateways, endpoints, or billing. Errors omit values. The bridge's `ccChildEnv` deliberately merges credential environments over the parent; validation therefore occurs before that merge, rather than trusting its propagation behavior.
+The Claude stream wrapper now validates both `process.env` and `options.env` before upstream invocation. The same validator protects native provider streams and both ACP stream requests. Per-request overrides accept only locale, timezone, terminal, and color settings. Credential-supplied empty strings cannot remove a forbidden variable or change HOME, executable lookup, native storage, gateways, endpoints, or billing. Errors omit values. The bridge's `ccChildEnv` deliberately merges credential environments over the parent; validation therefore occurs before that merge, rather than trusting its propagation behavior.
 
 Delegation checks capabilities at UI selection, dispatch, child initialization, and every native request. Depth is exactly one. Claude subscription workers remain disabled even if direct Claude use is activated. Consumer Antigravity ACP workers remain forbidden even if Google activation is complete or a human approves a task. No child loads the Claude bridge or ACP runtime. A separate Gemini API provider is not configured.
 
@@ -160,7 +164,7 @@ Restricted workers do not import those extensions. Native skill/prompt discovery
 
 Trusted custom tool implementations and provider factories remain application code too. Their metadata controls eligibility, not their arbitrary Node.js behavior. Review them before registration. The platform rejects unknown registrations, resource escalation, native subscription aliases, incompatible model metadata, and unsupported declared operations through its execution interfaces. It does not claim to contain malicious trusted implementations that deliberately avoid those interfaces.
 
-Claude and Google safeguards remain unchanged. Google consumer ACP cannot be delegated to, including through skill text, custom instances, workflows, or context transfer. Claude subscription workers remain blocked. No authentication store is copied, no provider is automatically substituted, no API billing fallback is enabled, and no authenticated qualification runs during CI.
+Claude and Google retain separate review revisions and activation locks. Google consumer ACP cannot be delegated to, including through skill text, custom instances, workflows, or context transfer. Claude subscription workers remain blocked. No authentication store is copied, no provider is automatically substituted, no API billing fallback is enabled, and no authenticated qualification runs during CI.
 
 ## Executable integration integrity
 

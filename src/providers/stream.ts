@@ -6,6 +6,7 @@ import {
 	type SimpleStreamOptions,
 	type TranscriptContext,
 } from "@earendil-works/pi-ai";
+import { ClaudeAcpError } from "./claude-acp.ts";
 import type { AcpSession } from "./acp.ts";
 
 export function acpStream(
@@ -103,11 +104,13 @@ export function acpStream(
 			endBlock();
 			message.stopReason = reason === "max_tokens" ? "length" : "stop";
 			stream.push({ type: "done", reason: message.stopReason, message });
-		} catch {
+		} catch (error) {
 			endBlock();
 			message.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			message.errorMessage =
-				"Official ACP request failed or was cancelled. No fallback attempted. See provider setup documentation.";
+				error instanceof ClaudeAcpError
+					? error.message
+					: "Official ACP request failed or was cancelled. No fallback attempted. See provider setup documentation.";
 			stream.push({ type: "error", reason: message.stopReason, error: message });
 		} finally {
 			stream.end();

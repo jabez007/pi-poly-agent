@@ -50,7 +50,13 @@ test("capabilities deny Google, Claude, unknown endpoints, nested delegation, an
 	for (const provider of ["antigravity-acp", "claude-bridge", "unknown", "zai"])
 		assert.throws(() => assertDelegation(provider, policy, 1));
 	policy.google.enabled = true;
-	policy.claude.enabled = true;
+	policy.claude = {
+		enabled: true,
+		mode: "bridge",
+		review: "2026-11-25.1",
+		runtime: "/reviewed/claude",
+		sha256: "a".repeat(64),
+	};
 	for (const provider of ["antigravity-acp", "claude-bridge"]) {
 		assert.equal(providerCapabilities(provider, policy).direct, true);
 		assert.throws(() => assertDelegation(provider, policy, 1));

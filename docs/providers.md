@@ -2,13 +2,14 @@
 
 All live capabilities remain unverified. Installation and CI do not authenticate accounts. The default policy is defined by `defaultPolicy()` in `src/policy.ts`.
 
-| Pi provider       | Execution path                                    | Authentication                 | Initial state                                 |
-| ----------------- | ------------------------------------------------- | ------------------------------ | --------------------------------------------- |
-| `openai-codex`    | Pi native provider                                | Pi's supported ChatGPT OAuth   | Available after native login                  |
-| `kimi-coding`     | Pi native coding endpoint                         | Pi's supported Kimi Code OAuth | Available after native login                  |
-| `zai`             | Pi native coding endpoint                         | Coding-plan key                | Locked until coding-plan acknowledgement      |
-| `claude-bridge`   | Upstream bridge, Agent SDK, installed Claude Code | Native Claude Code only        | Locked pending authorization review           |
-| `antigravity-acp` | Official ACP SDK, installed `agy acp`             | Runtime-owned `oauth-personal` | Locked pending review and explicit activation |
+| Pi provider       | Execution path                                              | Authentication                  | Initial state                                              |
+| ----------------- | ----------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------- |
+| `openai-codex`    | Pi native provider                                          | Pi's supported ChatGPT OAuth    | Available after native login                               |
+| `kimi-coding`     | Pi native coding endpoint                                   | Pi's supported Kimi Code OAuth  | Available after native login                               |
+| `zai`             | Pi native coding endpoint                                   | Coding-plan key                 | Locked until coding-plan acknowledgement                   |
+| `claude-acp`      | Pinned Claude ACP adapter, Agent SDK, installed Claude Code | Native Claude Code subscription | Default Claude mode; locked pending review and activation  |
+| `claude-bridge`   | Upstream bridge, Agent SDK, installed Claude Code           | Native Claude Code only         | Explicit alternative; locked pending review and activation |
+| `antigravity-acp` | Official ACP SDK, installed `agy acp`                       | Runtime-owned `oauth-personal`  | Locked pending review and explicit activation              |
 
 ## Use native coding-plan providers
 
@@ -42,13 +43,33 @@ The adapter currently supports text prompts, streamed reasoning, tool activity, 
 
 ## Review Claude subscription use
 
-Claude Code is installed externally and authenticates through Anthropic's own flow. This repository never starts it during installation, reads its credentials, or installs a custom OAuth provider.
+Both Claude modes share one activation lock in `.poly/agent/poly.json`. Omitted `claude.mode` selects `acp`; `bridge` explicitly selects the existing bridge. Their provider IDs are `claude-acp` and `claude-bridge`, so Pi history identifies the execution path. Neither mode is eligible for delegated workers.
 
-Anthropic's current [legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance) distinguishes native Claude Code subscription sign-in from authentication offered by third-party applications. How that distinction applies to this personal Pi Agent SDK frontend remains unresolved. Technical compatibility and T3 Code's implementation are not proof of permission. Keep Claude disabled until that question is resolved for your intended use and you explicitly authorize activation.
+Anthropic's [legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance) permits end users to sign in to an unmodified Claude Code binary on a hosting platform under stated conditions, while restricting third-party credential handling and subscription routing. The support article [Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says plan-authenticated SDK usage draws from subscription limits, whereas linked Console API keys use API credits. These statements do not establish Anthropic approval of either Pi integration. Review their applicability and account-level Extra Usage before explicitly activating your chosen mode.
 
-The pinned bridge uses the official Agent SDK `0.3.321`. Its main SDK path disables native execution tools and routes Pi tools through a strict MCP interface. It requests `bypassPermissions` internally. Pi's own interactive single-call approval gate therefore remains mandatory. The installed bridge's `src/index.ts` and `src/cc-child.ts` document these behaviors.
+Configure the externally installed, unmodified Claude Code executable with `claude.enabled`, `claude.review`, `claude.runtime` and `claude.sha256`. Claude now requires review revision `2026-11-25.1`; previous Claude activations require reapproval. Google's revision remains `2026-11-21.1` and its activation is unchanged. Bootstrap preserves existing settings; add `claude-acp/*` to Pi's `enabledModels` if your older profile filters it out.
 
-After authorization is settled, configure a reviewed native executable using `claude.enabled`, `claude.review`, `claude.runtime`, and `claude.sha256` in the policy. The review revision is `2026-11-21.1`. Add `.poly/agent/claude-bridge.json` with this provider configuration:
+### Default Claude ACP mode
+
+`@agentclientprotocol/claude-agent-acp` is pinned to `0.112.0` and its Agent SDK to `0.3.331`. The adapter uses Claude Code's native tools, system prompt and user, project and local settings. Pi sends no tool or system-prompt override. Native settings, hooks, plugins and tools execute with Claude Code's authority, outside the restricted worker sandbox.
+
+1. Run `claude auth login` yourself using the reviewed native executable. Pi does not open Claude credential stores or copy credentials.
+2. Set native Claude settings to `"permissions": { "defaultMode": "default" }`. This adapter otherwise defaults to Auto when available; discovery refuses an absent or different native default.
+3. Review native settings for authentication helpers and environment overrides. Linux preflight uses the adapter's pinned SDK settings resolver for user, project, local and managed settings, including cached organization policy; conflicting settings, policy helpers and unreadable managed policy are refused rather than rewritten.
+4. After authorization review, activate Claude with the new revision and checksum. Leave `claude.mode` absent or set it to `acp`.
+5. Restart Pi, run `/poly-claude-discover` and confirm the live operation. Choose a discovered Claude Code model with `/model` and submit your prompt yourself.
+
+The adapter receives the checksum-checked native path through its supported `CLAUDE_CODE_EXECUTABLE` override in its child environment. External overrides remain refused. Claude ACP preflight currently supports Linux only. It refuses inherited `CLAUDE_AGENT_*` overrides, including adapter logs and protocol selection.
+
+The client advertises no terminal-auth or gateway capabilities, calls no `authenticate` or `providers/*` method, and requires runtime-reported native subscription authentication. Missing login produces a fixed message asking you to run `claude auth login`; API-key, gateway, external or unknown authentication is refused without fallback. Discarded runtime stderr and fixed errors keep native diagnostics out of Pi logs.
+
+Sessions start in `default` mode. `/poly-claude-mode` offers the runtime's advertised `default`, `plan` and `acceptEdits` choices; `bypassPermissions`, `dontAsk` and `auto` are refused. Native permission requests use the shared contextual, single-use ACP approval UI. `acceptEdits` applies Claude Code's native editing permissions after your explicit selection.
+
+Discovery and restoration follow Google's confirmation rules with separate Claude bindings. Explicit discovery attempts `session/load` only when advertised; unsupported or failed restoration preserves Pi history and requires `/poly-claude-discover new` plus confirmation for a new session. No runtime starts during registration, startup or model selection. Only a fresh interactive TUI input can submit one Claude ACP prompt; automatically submitted handoffs, RPC input, steering and automatic continuation are refused. `/handoff-use` prepares editor text for your inspection and manual submission.
+
+### Optional Claude bridge mode
+
+Set `claude.mode` to `bridge` and retain `.poly/agent/claude-bridge.json`:
 
 ```json
 {
@@ -61,7 +82,7 @@ After authorization is settled, configure a reviewed native executable using `cl
 }
 ```
 
-Run validation and restart Pi. The executable must match the policy checksum. Review native Claude user settings for `apiKeyHelper`, billing overrides, environment variables, gateways, or cloud-provider settings. The managed validator rejects those authentication overrides in the native settings file. It does not inspect credential files. No setting disables provider-side Extra Usage on your account; review that separately before activation.
+The pinned bridge remains `0.13.0` with Agent SDK `0.3.321`. Pi owns its agent loop, tools and system prompt; the bridge routes Pi tools through strict MCP, disables native tools and requests `bypassPermissions` internally. Pi's interactive single-call tool approval remains mandatory. The bridge's existing native-settings and environment guards remain active, and its lifecycle hooks are loaded only when bridge mode is activated. Its registration may invoke the native SDK after activation; the ACP discovery confirmation applies to ACP mode only. The bridge's long-context setting does not disable account-level Extra Usage.
 
 ## Environment conflicts
 
@@ -71,14 +92,15 @@ Run `npm run validate` for variable names only. Correct the intended launch envi
 
 ## Delegation capabilities
 
-| Provider                              | Direct parent interaction          | Native Pi worker     | Restriction                                                              |
-| ------------------------------------- | ---------------------------------- | -------------------- | ------------------------------------------------------------------------ |
-| Codex                                 | After supported login              | Allowed              | ChatGPT OAuth only, guarded request, fresh child session                 |
-| Kimi                                  | After supported login              | Allowed              | OAuth by default; coding-plan key needs explicit opt-in                  |
-| Z.AI                                  | After coding-plan opt-in           | Allowed after opt-in | Coding endpoint only; key billing agreement must be verified by you      |
-| Claude SDK                            | Locked until authorized activation | Blocked              | Direct activation does not authorize subscription-backed delegation      |
-| Google consumer ACP                   | Locked until authorized activation | Forbidden            | Direct human input only; no model-generated or automated handoff prompts |
-| Custom APIs and open-weight endpoints | Unconfigured                       | Blocked              | Needs a separate explicitly authorized provider instance                 |
+| Provider                              | Direct parent interaction                                    | Native Pi worker     | Restriction                                                              |
+| ------------------------------------- | ------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------ |
+| Codex                                 | After supported login                                        | Allowed              | ChatGPT OAuth only, guarded request, fresh child session                 |
+| Kimi                                  | After supported login                                        | Allowed              | OAuth by default; coding-plan key needs explicit opt-in                  |
+| Z.AI                                  | After coding-plan opt-in                                     | Allowed after opt-in | Coding endpoint only; key billing agreement must be verified by you      |
+| Claude ACP (`claude-acp`)             | Locked until reviewed activation and explicit discovery      | Forbidden            | Native Claude Code; direct human input only, no automatic handoffs       |
+| Claude bridge (`claude-bridge`)       | Locked until reviewed activation and explicit mode selection | Blocked              | Pi agent loop; activation does not authorize worker delegation           |
+| Google consumer ACP                   | Locked until authorized activation                           | Forbidden            | Direct human input only; no model-generated or automated handoff prompts |
+| Custom APIs and open-weight endpoints | Unconfigured                                                 | Blocked              | Needs a separate explicitly authorized provider instance                 |
 
 Codex, Kimi, and opted-in Z.AI parents can request the `delegate_task` tool, subject to interactive approval. A user can invoke delegation commands while another direct provider is selected, but only an eligible registered worker is dispatched. Agent configuration cannot widen provider policy. Effective permissions determine whether an agent can edit.
 

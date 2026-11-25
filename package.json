@@ -24,6 +24,7 @@
 		"recipe": "node --import tsx scripts/cli.ts recipe"
 	},
 	"dependencies": {
+		"@agentclientprotocol/claude-agent-acp": "0.112.0",
 		"@agentclientprotocol/sdk": "2.6.0",
 		"@earendil-works/pi-ai": "1.5.2",
 		"@earendil-works/pi-coding-agent": "1.5.2",

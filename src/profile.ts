@@ -25,6 +25,7 @@ export const SETTINGS = {
 		"kimi-coding/*",
 		"zai/*",
 		"claude-bridge/*",
+		"claude-acp/*",
 		"antigravity-acp/*",
 	],
 	compaction: { enabled: false },

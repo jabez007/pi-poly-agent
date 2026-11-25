@@ -22,6 +22,7 @@ const VERSIONS = {
 	"@earendil-works/pi-coding-agent": "1.5.2",
 	"@earendil-works/pi-ai": "1.5.2",
 	"pi-claude-bridge": "0.13.0",
+	"@agentclientprotocol/claude-agent-acp": "0.112.0",
 	"@agentclientprotocol/sdk": "2.6.0",
 	"@modelcontextprotocol/sdk": "1.32.2",
 	typebox: "1.3.27",

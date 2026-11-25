@@ -6,6 +6,7 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import {
 	ACP_PROVIDER,
 	BRIDGE_PROVIDER,
+	CLAUDE_ACP_PROVIDER,
 	assertRequest,
 	guardedProvider,
 	type Policy,
@@ -28,7 +29,14 @@ export interface ProviderAdapter {
 	id: string;
 	create(instance: ProviderInstance): Provider;
 }
-const reserved = ["openai-codex", "kimi-coding", "zai", BRIDGE_PROVIDER, ACP_PROVIDER];
+const reserved = [
+	"openai-codex",
+	"kimi-coding",
+	"zai",
+	BRIDGE_PROVIDER,
+	CLAUDE_ACP_PROVIDER,
+	ACP_PROVIDER,
+];
 export function nativeWorkerProvider(id: string): Provider {
 	if (!["openai-codex", "kimi-coding", "zai"].includes(id))
 		throw new Error("Worker provider is not supported");
@@ -153,7 +161,7 @@ export class ProviderRegistry {
 				id,
 				adapter: id,
 				enabled: true,
-				authentication: [BRIDGE_PROVIDER, ACP_PROVIDER].includes(id)
+				authentication: [BRIDGE_PROVIDER, CLAUDE_ACP_PROVIDER, ACP_PROVIDER].includes(id)
 					? "native-runtime"
 					: "pi-managed",
 				billing: id === "kimi-coding" || id === "zai" ? "coding-plan" : "subscription",
