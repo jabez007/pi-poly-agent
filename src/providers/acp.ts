@@ -26,11 +26,45 @@ export interface AcpHandlers {
 }
 export type AcpFactory = (handlers: AcpHandlers) => Promise<AcpPort>;
 
-export function officialAcpFactory(activation: Activation, cwd: string): AcpFactory {
+export interface AcpRuntime {
+	discoveryCommand: string;
+	command(
+		activation: Activation,
+		cwd: string,
+	): { executable: string; args: string[]; env?: NodeJS.ProcessEnv };
+	login(initialized: any, request: AcpPort["request"]): Promise<void>;
+	models(session: NewSessionResponse): { id: string; name: string; configId: string }[];
+}
+
+export const GOOGLE_ACP_RUNTIME: AcpRuntime = {
+	discoveryCommand: "poly-google-discover",
+	command: (activation) => ({ executable: attestRuntime(activation), args: ["acp"] }),
+	login: async (initialized, request) => {
+		if (!initialized.authMethods?.some((method: { id: string }) => method.id === "oauth-personal"))
+			throw new Error("Runtime does not advertise native personal OAuth");
+		// Credentials and browser flow stay inside Google's runtime.
+		await request(
+			"authenticate",
+			{ methodId: "oauth-personal" },
+			{ signal: AbortSignal.timeout(120000) },
+		);
+	},
+	models: (session) => configModels(session).filter((model) => /^gemini[-.]/i.test(model.id)),
+};
+
+export function officialAcpFactory(
+	activation: Activation,
+	cwd: string,
+	runtime: AcpRuntime = GOOGLE_ACP_RUNTIME,
+): AcpFactory {
 	return async (handlers) => {
 		assertEnvironment(process.env);
-		const executable = attestRuntime(activation);
-		const child = spawn(executable, ["acp"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+		const command = runtime.command(activation, cwd);
+		const child = spawn(command.executable, command.args, {
+			cwd,
+			env: command.env,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
 		// Runtime stderr can include authorization URLs and account data. Never relay it.
 		child.stderr.resume();
 		const app = client({ name: "pi-poly-agent" })
@@ -61,22 +95,15 @@ export function officialAcpFactory(activation: Activation, cwd: string): AcpFact
 				},
 				{ cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true },
 			);
-			if (!initialized.authMethods?.some((method) => method.id === "oauth-personal")) {
-				throw new Error("Runtime does not advertise native personal OAuth");
-			}
-			// Documented ACP request. Credentials and browser flow stay inside Google's runtime.
-			await connection.agent.request(
-				"authenticate",
-				{ methodId: "oauth-personal" },
-				{ cancellationSignal: AbortSignal.timeout(120000), stopWaitingOnCancel: true },
-			);
+			const request: AcpPort["request"] = (method, params, options) =>
+				connection.agent.request(method, params, {
+					cancellationSignal: options?.signal,
+					stopWaitingOnCancel: true,
+				});
+			await runtime.login(initialized, request);
 			return {
 				supportsLoad: initialized.agentCapabilities?.loadSession === true,
-				request: (m, p, o) =>
-					connection.agent.request(m, p, {
-						cancellationSignal: o?.signal,
-						stopWaitingOnCancel: true,
-					}),
+				request,
 				notify: (m, p) => connection.agent.notify(m, p),
 				close,
 			};
@@ -142,6 +169,13 @@ function hasCommand(input: unknown): boolean {
 
 export function discoveredModels(
 	session: NewSessionResponse,
+	runtime: AcpRuntime = GOOGLE_ACP_RUNTIME,
+): { id: string; name: string; configId: string }[] {
+	return runtime.models(session);
+}
+
+export function configModels(
+	session: NewSessionResponse,
 ): { id: string; name: string; configId: string }[] {
 	const config = session.configOptions?.find(
 		(option) => option.category === "model" || option.id === "model",
@@ -150,10 +184,7 @@ export function discoveredModels(
 	const options = config.options.flatMap((option) =>
 		"group" in option ? option.options : [option],
 	);
-	// Google consumer ACP access in this profile is restricted to Gemini models.
-	return options
-		.filter((option) => /^gemini[-.]/i.test(option.value))
-		.map((option) => ({ id: option.value, name: option.name, configId: config.id }));
+	return options.map((option) => ({ id: option.value, name: option.name, configId: config.id }));
 }
 
 /** One official session per Pi session in this process. No hidden cross-provider state transfer. */
@@ -173,11 +204,12 @@ export class AcpSession {
 			save(binding: { sessionId: string; cwd: string }): void;
 			report(message: string): void;
 		},
+		private runtime: AcpRuntime = GOOGLE_ACP_RUNTIME,
 	) {}
 
 	async discover(fresh = false): Promise<ReturnType<typeof discoveredModels>> {
 		await this.ensureSession(fresh);
-		return discoveredModels(this.session!);
+		return discoveredModels(this.session!, this.runtime);
 	}
 
 	private async ensureSession(fresh: boolean): Promise<void> {
@@ -212,7 +244,7 @@ export class AcpSession {
 		if (saved && !fresh) {
 			if (saved.cwd !== this.cwd || !this.port!.supportsLoad) {
 				this.recovery!.report(
-					"Official runtime cannot restore this ACP session. Local history and /handoff remain available. Use /poly-google-discover new to authorize a fresh session.",
+					`Official runtime cannot restore this ACP session. Local history and /handoff remain available. Use /${this.runtime.discoveryCommand} new to authorize a fresh session.`,
 				);
 				throw new Error("ACP restoration unavailable");
 			}
@@ -228,7 +260,7 @@ export class AcpSession {
 				return { ...loaded, sessionId: saved.sessionId };
 			} catch {
 				this.recovery!.report(
-					"ACP restoration failed. Saved binding and Pi history were preserved. Prepare /handoff and explicitly authorize /poly-google-discover new.",
+					`ACP restoration failed. Saved binding and Pi history were preserved. Prepare /handoff and explicitly authorize /${this.runtime.discoveryCommand} new.`,
 				);
 				throw new Error("ACP restoration failed");
 			}
@@ -248,8 +280,10 @@ export class AcpSession {
 	): Promise<string> {
 		if (this.active) throw new Error("ACP already has an active user turn");
 		if (!this.session)
-			throw new Error("Run /poly-google-discover to authorize session initialization or recovery");
-		const selected = discoveredModels(this.session!).find((m) => m.id === model);
+			throw new Error(
+				`Run /${this.runtime.discoveryCommand} to authorize session initialization or recovery`,
+			);
+		const selected = discoveredModels(this.session!, this.runtime).find((m) => m.id === model);
 		if (!selected) throw new Error("Model was not discovered from the official runtime");
 		if (signal?.aborted) throw new Error("Cancelled");
 		this.active = true;
