@@ -62,7 +62,11 @@ Configure the externally installed, unmodified Claude Code executable with `clau
 
 The adapter receives the checksum-checked native path through its supported `CLAUDE_CODE_EXECUTABLE` override in its child environment. The transport rechecks that path before session creation, restoration, prompts and native login-status probes. A changed executable closes the port and requires a new review. External overrides remain refused. Claude ACP preflight currently supports Linux only. It refuses inherited `CLAUDE_AGENT_*` overrides, including adapter logs and protocol selection.
 
+`npm run validate` names the selected Claude mode. An outdated Claude review appears as `needs reapproval`.
+
 The client advertises no terminal-auth or gateway capabilities, calls no `authenticate` or `providers/*` method, and requires runtime-reported native subscription authentication. Missing login produces a fixed message asking you to run `claude auth login`; API-key, gateway, external or unknown authentication is refused without fallback. Discarded runtime stderr and fixed errors keep native diagnostics out of Pi logs.
+
+Session creation and restoration send `_meta.claudeCode.options.allowDangerouslySkipPermissions: false`. Other session metadata is refused. Forbidden-mode notifications close the port. Pending turns retain the forbidden-mode refusal.
 
 Sessions start in `default` mode. `/poly-claude-mode` offers the runtime's advertised `default`, `plan` and `acceptEdits` choices; `bypassPermissions`, `dontAsk` and `auto` are refused. Native permission requests use the shared contextual, single-use ACP approval UI. `acceptEdits` applies Claude Code's native editing permissions after your explicit selection.
 

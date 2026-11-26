@@ -58,6 +58,8 @@ export const CLAUDE_ACP_RUNTIME = {
 	models: (session) => configModels(session),
 	beforeRequest: async (method, cwd, request, params) => {
 		assertNativeRequest(method, params);
+		if (["session/new", "session/load"].includes(method))
+			params._meta = { claudeCode: { options: { allowDangerouslySkipPermissions: false } } };
 		await assertClaudeAcpSettings(cwd);
 		await requireClaudeSubscription(request);
 	},
@@ -86,9 +88,34 @@ function assertNativeRequest(method: string, params: any): void {
 		throw new ClaudeAcpError("Claude ACP permission mode is forbidden");
 	if (method === "session/set_config_option" && params?.configId !== "model")
 		throw new ClaudeAcpError("Claude ACP configuration override refused");
+	if (["session/new", "session/load"].includes(method)) assertSessionOptions(params);
+}
+
+function assertSessionOptions(params: any): void {
 	if (
-		["session/new", "session/load"].includes(method) &&
-		Object.keys(params || {}).some((key) => !["sessionId", "cwd", "mcpServers"].includes(key))
+		Object.keys(params || {}).some(
+			(key) => !["sessionId", "cwd", "mcpServers", "_meta"].includes(key),
+		) ||
+		(Object.hasOwn(params || {}, "_meta") && !reviewedMetadata(params._meta))
 	)
 		throw new ClaudeAcpError("Claude ACP session override refused");
+}
+
+function reviewedMetadata(value: any): boolean {
+	return (
+		onlyKey(value, "claudeCode") &&
+		onlyKey(value.claudeCode, "options") &&
+		onlyKey(value.claudeCode.options, "allowDangerouslySkipPermissions") &&
+		value.claudeCode.options.allowDangerouslySkipPermissions === false
+	);
+}
+
+function onlyKey(value: any, key: string): boolean {
+	return (
+		value !== null &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		Object.keys(value).length === 1 &&
+		Object.hasOwn(value, key)
+	);
 }

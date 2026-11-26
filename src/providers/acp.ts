@@ -395,14 +395,19 @@ export class AcpSession {
 			this.assertMode();
 			return result.stopReason;
 		} catch (error) {
-			this.close();
-			const message = "ACP turn failed or cancelled; no fallback attempted";
-			throw this.runtime.error?.(error, message) || new Error(message);
+			throw this.turnError(error);
 		} finally {
 			this.active = false;
 			this.update = () => {};
 			signal?.removeEventListener("abort", cancel);
 		}
+	}
+
+	private turnError(error: unknown): Error {
+		const failure = this.modeFailure || error;
+		this.close();
+		const message = "ACP turn failed or cancelled; no fallback attempted";
+		return this.runtime.error?.(failure, message) || new Error(message);
 	}
 
 	close(): void {
