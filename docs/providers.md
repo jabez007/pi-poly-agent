@@ -55,11 +55,12 @@ Configure the externally installed, unmodified Claude Code executable with `clau
 
 1. Run `claude auth login` yourself using the reviewed native executable. Pi does not open Claude credential stores or copy credentials.
 2. Set native Claude settings to `"permissions": { "defaultMode": "default" }`. This adapter otherwise defaults to Auto when available; discovery refuses an absent or different native default.
-3. Review native settings for authentication helpers and environment overrides. Linux preflight uses the adapter's pinned SDK settings resolver for user, project, local and managed settings, including cached organization policy; conflicting settings, policy helpers and unreadable managed policy are refused rather than rewritten.
-4. After authorization review, activate Claude with the new revision and checksum. Leave `claude.mode` absent or set it to `acp`.
-5. Restart Pi, run `/poly-claude-discover` and confirm the live operation. Choose a discovered Claude Code model with `/model` and submit your prompt yourself.
+3. Set `"DISABLE_AUTOUPDATER": "1"` in the `env` object of your native user settings. This disables background updates. See [Claude Code update controls](https://code.claude.com/docs/en/setup#disable-auto-updates). Manual updates still require a new executable review and checksum.
+4. Review native settings for authentication helpers and environment overrides. Linux preflight uses the adapter's pinned SDK settings resolver for user, project, local and managed settings, including cached organization policy; conflicting settings, policy helpers and unreadable managed policy are refused rather than rewritten.
+5. After authorization review, activate Claude with the new revision and checksum. Leave `claude.mode` absent or set it to `acp`.
+6. Restart Pi, run `/poly-claude-discover` and confirm the live operation. Choose a discovered Claude Code model with `/model` and submit your prompt yourself.
 
-The adapter receives the checksum-checked native path through its supported `CLAUDE_CODE_EXECUTABLE` override in its child environment. External overrides remain refused. Claude ACP preflight currently supports Linux only. It refuses inherited `CLAUDE_AGENT_*` overrides, including adapter logs and protocol selection.
+The adapter receives the checksum-checked native path through its supported `CLAUDE_CODE_EXECUTABLE` override in its child environment. The transport rechecks that path before session creation, restoration, prompts and native login-status probes. A changed executable closes the port and requires a new review. External overrides remain refused. Claude ACP preflight currently supports Linux only. It refuses inherited `CLAUDE_AGENT_*` overrides, including adapter logs and protocol selection.
 
 The client advertises no terminal-auth or gateway capabilities, calls no `authenticate` or `providers/*` method, and requires runtime-reported native subscription authentication. Missing login produces a fixed message asking you to run `claude auth login`; API-key, gateway, external or unknown authentication is refused without fallback. Discarded runtime stderr and fixed errors keep native diagnostics out of Pi logs.
 

@@ -106,11 +106,14 @@ export function officialAcpFactory(
 				},
 				{ cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true },
 			);
-			const request: AcpPort["request"] = (method, params, options) =>
-				connection.agent.request(method, params, {
+			const request: AcpPort["request"] = (method, params, options) => {
+				// Native Claude may be launched again by session and auth RPCs.
+				recheckExecutable(runtime, activation, command.env?.CLAUDE_CODE_EXECUTABLE, method, close);
+				return connection.agent.request(method, params, {
 					cancellationSignal: options?.signal,
 					stopWaitingOnCancel: true,
 				});
+			};
 			await runtime.login(initialized, request);
 			return {
 				supportsLoad: initialized.agentCapabilities?.loadSession === true,
@@ -127,6 +130,25 @@ export function officialAcpFactory(
 			throw runtime.error?.(error, message) || new Error(message);
 		}
 	};
+}
+
+function recheckExecutable(
+	runtime: AcpRuntime,
+	activation: Activation,
+	pinned: string | undefined,
+	method: string,
+	close: () => void,
+): void {
+	if (!pinned || !["session/new", "session/load", "session/prompt", "auth/status"].includes(method))
+		return;
+	try {
+		if (attestRuntime(activation) !== pinned) throw new Error("Native runtime path changed");
+	} catch {
+		close();
+		const message =
+			"Reviewed Claude Code executable changed; complete a new review before retrying.";
+		throw runtime.error?.(undefined, message) || new Error(message);
+	}
 }
 
 export async function permissionDecision(
