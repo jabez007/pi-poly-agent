@@ -207,6 +207,7 @@ export class AcpSession {
 	private port?: AcpPort;
 	private session?: NewSessionResponse;
 	private active = false;
+	private restored = false;
 	private modeFailure?: Error;
 	private aborted?: AbortSignal;
 	private update: (event: SessionNotification) => void = () => {};
@@ -239,7 +240,7 @@ export class AcpSession {
 						: Promise.resolve({ outcome: { outcome: "cancelled" } }),
 			});
 			this.session = await this.openSession(fresh);
-			this.runtime.validateSession?.(this.session);
+			if (!this.restored) this.runtime.validateSession?.(this.session);
 			if (!this.session?.modes?.availableModes.some((mode) => mode.id === "default"))
 				throw new Error("Prompting mode unavailable");
 			await this.port.request(
@@ -282,6 +283,9 @@ export class AcpSession {
 					{ sessionId: saved.sessionId, cwd: this.cwd, mcpServers: [] },
 					{ signal: AbortSignal.timeout(15000) },
 				);
+				if (this.runtime.modeAllowed && !this.runtime.modeAllowed(loaded.modes?.currentModeId))
+					throw new Error("Resumed ACP permission mode is forbidden");
+				this.restored = true;
 				this.recovery!.report(
 					"Official ACP session/load succeeded; local Pi history remains authoritative.",
 				);
@@ -383,6 +387,7 @@ export class AcpSession {
 		this.port?.close();
 		this.port = undefined;
 		this.session = undefined;
+		this.restored = false;
 		this.modeFailure = undefined;
 	}
 }
