@@ -21,6 +21,7 @@ export async function registerClaudeBridge(
 				.getModels()
 				.map((model) => ({ ...model, name: `${model.name} [locked]` })),
 			streamSimple: () => {
+				check();
 				throw new Error("Claude SDK is locked pending authorization review and activation");
 			},
 		});

@@ -10,7 +10,7 @@ import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.t
 import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
 import { registerClaudeAcp } from "./providers/claude-acp-extension.ts";
-import { CLAUDE_ACP_PROVIDER, claudeMode } from "./policy.ts";
+import { CLAUDE_ACP_PROVIDER } from "./policy.ts";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
 	ExtensionAPI,
@@ -127,7 +127,7 @@ export default async function polyExtension(
 	await registerClaudeBridge(
 		pi,
 		profile,
-		{ ...policy.claude, enabled: policy.claude.enabled && claudeMode(policy) === "bridge" },
+		{ ...policy.claude, enabled: providers.capabilities(BRIDGE_PROVIDER).direct },
 		() => check(BRIDGE_PROVIDER),
 	);
 
@@ -271,8 +271,8 @@ export default async function polyExtension(
 					"openai-codex: native ChatGPT OAuth",
 					`kimi-coding: native OAuth${policy.kimiApiKey ? " or explicitly allowed coding-plan key" : " only"}`,
 					`zai: coding-plan key ${policy.zaiCodingPlan ? "allowed" : "locked"}`,
-					`claude-acp: native Claude Code, direct user only, ${policy.claude.enabled && claudeMode(policy) === "acp" ? "activated, live unverified" : "locked or unselected"}`,
-					`claude-bridge: official SDK ${policy.claude.enabled && claudeMode(policy) === "bridge" ? "activated, live unverified" : "locked, authorization unresolved"}`,
+					providerStatus(CLAUDE_ACP_PROVIDER, policy),
+					providerStatus(BRIDGE_PROVIDER, policy),
 					`antigravity-acp: direct user only, ${policy.google.enabled ? "activated, live unverified" : "locked"}`,
 					`memory: ${memoryEnabled ? "enabled" : "optional, disabled"}`,
 				].join("\n"),

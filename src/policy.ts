@@ -40,14 +40,8 @@ export function providerStatus(provider: string, policy: Policy): string {
 		"openai-codex": "ChatGPT OAuth",
 		"kimi-coding": policy.kimiApiKey ? "Kimi plan OAuth/key" : "Kimi plan OAuth",
 		zai: policy.zaiCodingPlan ? "Z.AI coding-plan key" : "coding-plan key locked",
-		[BRIDGE_PROVIDER]:
-			policy.claude.enabled && claudeMode(policy) === "bridge"
-				? "native Claude auth, Pi tools"
-				: "Claude bridge locked or unselected",
-		[CLAUDE_ACP_PROVIDER]:
-			policy.claude.enabled && claudeMode(policy) === "acp"
-				? "native Claude auth, direct user only"
-				: "Claude ACP locked or unselected",
+		[BRIDGE_PROVIDER]: claudeStatus(BRIDGE_PROVIDER, policy),
+		[CLAUDE_ACP_PROVIDER]: claudeStatus(CLAUDE_ACP_PROVIDER, policy),
 		[ACP_PROVIDER]: policy.google.enabled
 			? "personal OAuth, direct user only"
 			: "Google auth locked",
@@ -55,10 +49,20 @@ export function providerStatus(provider: string, policy: Policy): string {
 	return `Poly | ${provider} | ${modes[provider] || "unconfigured"}`;
 }
 
+function claudeStatus(provider: string, policy: Policy): string {
+	if (policy.claude.enabled && policy.claude.review !== CLAUDE_REVIEW_REVISION)
+		return `needs reapproval; re-review and update claude.review to ${CLAUDE_REVIEW_REVISION}`;
+	if (!policy.claude.enabled) return "Claude auth locked";
+	if (provider !== `claude-${claudeMode(policy)}`) return "Claude mode unselected";
+	return provider === BRIDGE_PROVIDER
+		? "activated, live unverified; native Claude auth, Pi tools"
+		: "activated, live unverified; native Claude auth, direct user only";
+}
+
 export function validatePolicy(value: unknown): Policy {
 	const p = value as Policy;
 	if (!p || p.version !== 1) throw new Error("Unsupported profile policy");
-	validateActivation(p.claude, CLAUDE_REVIEW_REVISION);
+	validateActivation(p.claude, null);
 	if (p.claude.mode !== undefined && !["acp", "bridge"].includes(p.claude.mode))
 		throw new Error("Claude mode must be acp or bridge");
 	validateActivation(p.google);
@@ -77,14 +81,16 @@ export function validatePolicy(value: unknown): Policy {
 	return p;
 }
 
-function validateActivation(a: Activation, revision = POLICY_REVISION): void {
+function validateActivation(a: Activation, revision: string | null = POLICY_REVISION): void {
 	if (!a || typeof a.enabled !== "boolean") throw new Error("Invalid activation policy");
 	if (![a.review, a.runtime, a.sha256].every((v) => typeof v === "string")) {
 		throw new Error("Invalid runtime attestation");
 	}
 	if (
 		a.enabled &&
-		(a.review !== revision || !a.runtime.startsWith("/") || !/^[a-f0-9]{64}$/.test(a.sha256))
+		((revision !== null && a.review !== revision) ||
+			!a.runtime.startsWith("/") ||
+			!/^[a-f0-9]{64}$/.test(a.sha256))
 	) {
 		throw new Error("Activation needs a current review and an absolute, checksum-pinned runtime");
 	}
@@ -160,7 +166,11 @@ export function isClaudeProvider(provider: string): boolean {
 function assertClaudeRequest(provider: string, policy: Policy, direct: boolean): void {
 	if (!policy.claude.enabled)
 		throw new Error("Claude subscription integration is locked pending authorization review");
-	validateActivation(policy.claude, CLAUDE_REVIEW_REVISION);
+	validateActivation(policy.claude, null);
+	if (policy.claude.review !== CLAUDE_REVIEW_REVISION)
+		throw new Error(
+			`Claude integration needs reapproval; re-review and update claude.review to ${CLAUDE_REVIEW_REVISION}`,
+		);
 	const selected = claudeMode(policy) === "acp" ? CLAUDE_ACP_PROVIDER : BRIDGE_PROVIDER;
 	if (provider !== selected) throw new Error("Claude mode is not selected in policy");
 	if (provider === CLAUDE_ACP_PROVIDER && !direct)

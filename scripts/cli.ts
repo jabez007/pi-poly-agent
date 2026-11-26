@@ -14,7 +14,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bootstrap, PROFILE, validateProfile, assertSafeProfile } from "../src/profile.ts";
-import { assertEnvironment, conflictingEnvironment } from "../src/policy.ts";
+import {
+	assertEnvironment,
+	conflictingEnvironment,
+	providerStatus,
+	claudeMode,
+} from "../src/policy.ts";
 import { discoverMemPalace } from "../src/memory.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -111,7 +116,7 @@ function reportValidation(
 				agents: platform.agents.map((a) => a.name),
 				workflows: platform.workflows.map((w) => w.id),
 				node: process.versions.node,
-				claude: policy.claude.enabled ? "activated, live unverified" : "locked",
+				claude: providerStatus(`claude-${claudeMode(policy)}`, policy),
 				google: policy.google.enabled ? "activated, live unverified" : "locked",
 				conflictingVariableNames: names,
 				mempalace: discoverMemPalace()

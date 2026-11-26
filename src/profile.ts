@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
 	conflictingEnvironment,
+	CLAUDE_REVIEW_REVISION,
 	defaultPolicy,
 	validatePolicy,
 	type Activation,
@@ -124,7 +125,7 @@ export function validateProfile(profile = PROFILE): Policy {
 			throw new Error("Unexpected profile resource; manual review required");
 	}
 	const policy = loadPolicy(profile);
-	if (policy.claude.enabled) {
+	if (policy.claude.enabled && policy.claude.review === CLAUDE_REVIEW_REVISION) {
 		attestRuntime(policy.claude);
 		validateClaudeSettings();
 	}

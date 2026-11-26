@@ -37,7 +37,9 @@ test("Claude reapproval leaves the existing Google review revision valid", () =>
 	policy.google = { ...reviewed(), review: POLICY_REVISION };
 	assert.doesNotThrow(() => validatePolicy(policy));
 	policy.claude.review = POLICY_REVISION;
-	assert.throws(() => validatePolicy(policy), /review/);
+	assert.doesNotThrow(() => validatePolicy(policy));
+	assert.doesNotThrow(() => assertRequest("antigravity-acp", policy, true));
+	assert.throws(() => assertRequest("claude-acp", policy, true), /reapproval.*claude\.review/);
 });
 test("Claude ACP requires direct interaction and neither mode can become a worker or alias", () => {
 	const policy = defaultPolicy();
