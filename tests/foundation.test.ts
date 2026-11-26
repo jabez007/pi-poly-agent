@@ -1,171 +1,198 @@
-import { normalizeContext } from "@earendil-works/pi-ai";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import {
-	bootstrap,
-	loadPolicy,
-	validateProfile,
-	validateClaudeSettings,
-	readConfiguration,
-} from "../src/profile.ts";
+import { normalizeContext } from "@earendil-works/pi-ai";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
+import { bootstrap, validateProfile, readConfiguration, SETTINGS } from "../src/profile.ts";
 import {
 	ACP_PROVIDER,
+	BRIDGE_PROVIDER,
+	CLAUDE_ACP_PROVIDER,
 	assertEnvironment,
+	assertInvocationEnvironment,
 	assertRequest,
+	CLAUDE_BILLING_ENV,
+	GOOGLE_BILLING_ENV,
 	conflictingEnvironment,
 	defaultPolicy,
 	guardedProvider,
-	POLICY_REVISION,
 	validatePolicy,
 } from "../src/policy.ts";
 import { assertNode, launchArguments, assertProjectConfiguration } from "../scripts/cli.ts";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 
-test("bootstrap is idempotent and preserves existing configuration", () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-install-"));
-	const profile = join(root, "isolated");
-	const existing = join(root, "existing.json");
-	writeFileSync(existing, "personal configuration");
+test("bootstrap preserves policy and native resources and registers only its own extension idempotently", () => {
+	const profile = mkdtempSync(join(tmpdir(), "poly-bootstrap-"));
 	bootstrap(profile);
-	const before = readFileSync(join(profile, "poly.json"), "utf8");
-	bootstrap(profile);
-	assert.equal(readFileSync(join(profile, "poly.json"), "utf8"), before);
-	assert.equal(readFileSync(existing, "utf8"), "personal configuration");
-	writeFileSync(join(profile, "settings.json"), "custom settings");
-	assert.throws(() => bootstrap(profile));
-	assert.equal(readFileSync(join(profile, "settings.json"), "utf8"), "custom settings");
-});
-
-test("bootstrap accepts Pi's saved model preferences without weakening fixed safeguards", () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-preferences-"));
-	bootstrap(root);
-	const file = join(root, "settings.json");
+	const file = join(profile, "settings.json");
 	const settings = JSON.parse(readFileSync(file, "utf8"));
-	settings.lastChangelogVersion = "1.5.2";
+	settings.extensions = ["./personal.ts"];
+	settings.packages = ["./installed-package"];
 	settings.defaultProvider = "kimi-coding";
-	settings.defaultModel = "fixture";
 	writeFileSync(file, JSON.stringify(settings));
-	assert.doesNotThrow(() => bootstrap(root));
-	assert.doesNotThrow(() => validateProfile(root));
-	settings.compaction.enabled = true;
-	writeFileSync(file, JSON.stringify(settings));
-	assert.throws(() => validateProfile(root), /untouched/);
+	const policy = readFileSync(join(profile, "poly.json"), "utf8");
+	bootstrap(profile);
+	const before = readFileSync(file, "utf8");
+	bootstrap(profile);
+	assert.equal(readFileSync(file, "utf8"), before);
+	assert.equal(readFileSync(join(profile, "poly.json"), "utf8"), policy);
+	assert.deepEqual(JSON.parse(before).extensions, [...SETTINGS.extensions, "./personal.ts"]);
+	assert.deepEqual(JSON.parse(before).packages, ["./installed-package"]);
+	assert.equal(JSON.parse(before).defaultProvider, "kimi-coding");
 });
 
-test("profile rejects symlinks, invalid policy, and unreviewed overrides", () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-policy-"));
-	bootstrap(join(root, "profile"));
-	symlinkSync(join(root, "profile"), join(root, "link"));
-	assert.throws(() => bootstrap(join(root, "link")), /symlink/);
-	const p = defaultPolicy();
-	p.google.enabled = true;
-	assert.throws(() => validatePolicy(p), /attestation|review/);
-	assert.equal(loadPolicy(join(root, "profile")).google.enabled, false);
-	writeFileSync(join(root, "profile/models.json"), "{}");
-	assert.throws(() => validateProfile(join(root, "profile")), /Unexpected/);
-});
-
-test("Google requires activation and direct user input even with human-approved delegation", () => {
-	const p = defaultPolicy();
-	assert.throws(() => assertRequest(ACP_PROVIDER, p, true), /locked/);
-	p.google = {
-		enabled: true,
-		review: POLICY_REVISION,
-		runtime: "/official/agy",
-		sha256: "a".repeat(64),
+test("round nine activation fields and retired files are ignored with one notice without rewriting them", () => {
+	const profile = mkdtempSync(join(tmpdir(), "poly-legacy-"));
+	bootstrap(profile);
+	const value = {
+		...defaultPolicy(),
+		agents: { ignored: true },
+		claude: { enabled: true, review: "old", runtime: "old relative path", sha256: "old checksum" },
+		google: { enabled: true, review: "old", runtime: "/old/agy", sha256: "bad" },
 	};
-	assert.doesNotThrow(() => assertRequest(ACP_PROVIDER, p, true));
-	assert.throws(() => assertRequest(ACP_PROVIDER, p, false), /delegation/);
-	assert.throws(() => assertRequest("claude-bridge", p), /locked/);
-	assert.throws(() => assertRequest("google", p, true), /outside/);
-	assert.throws(() => assertRequest("openai", p), /outside/);
-	assert.throws(() => assertRequest("zai", p), /opt-in/);
-	assert.doesNotThrow(() => assertRequest("openai-codex", p));
+	const file = join(profile, "poly.json");
+	const text = JSON.stringify(value);
+	writeFileSync(file, text);
+	for (const name of ["platform.json", "orchestration.json", "integrations.json"])
+		writeFileSync(join(profile, name), "ignored malformed retired configuration");
+	const messages: string[] = [];
+	const previous = console.warn;
+	console.warn = (message) => {
+		messages.push(message);
+	};
+	try {
+		bootstrap(profile);
+		bootstrap(profile);
+		const policy = validateProfile(profile);
+		assert.deepEqual(policy.claude, { enabled: true, mode: "acp" });
+		assert.deepEqual(policy.google, { enabled: true });
+		assert.equal(messages.length, 1);
+		assert.match(messages[0], /no longer used|ignores retired/);
+		assert.equal(readFileSync(file, "utf8"), text);
+	} finally {
+		console.warn = previous;
+	}
 });
 
-test("environment diagnostics contain names and never credential values", () => {
-	const env = {
-		ANTHROPIC_API_KEY: "fixture-do-not-print",
-		HTTPS_PROXY: "https://fixture:secret@proxy.example",
-		GEMINI_API_KEY: "fixture-google",
-	};
-	assert.deepEqual(conflictingEnvironment(env), [
-		"ANTHROPIC_API_KEY",
-		"GEMINI_API_KEY",
-		"HTTPS_PROXY",
-	]);
+test("both Claude modes and Gemini require opt-in and direct human input", () => {
+	for (const provider of [BRIDGE_PROVIDER, CLAUDE_ACP_PROVIDER, ACP_PROVIDER]) {
+		const policy = defaultPolicy();
+		assert.throws(() => assertRequest(provider, policy, true), /off/);
+		policy.claude.enabled = policy.google.enabled = true;
+		policy.claude.mode = provider === BRIDGE_PROVIDER ? "bridge" : "acp";
+		assert.throws(() => assertRequest(provider, policy), /direct interactive/);
+		assert.doesNotThrow(() => assertRequest(provider, policy, true));
+	}
+	assert.throws(() => assertRequest("zai", defaultPolicy()), /opt-in/);
+	for (const provider of ["openai-codex", "kimi-coding"])
+		assert.doesNotThrow(() => assertRequest(provider, defaultPolicy()));
+});
+
+for (const [provider, names] of [
+	[CLAUDE_ACP_PROVIDER, CLAUDE_BILLING_ENV],
+	[BRIDGE_PROVIDER, CLAUDE_BILLING_ENV],
+	[ACP_PROVIDER, GOOGLE_BILLING_ENV],
+] as const) {
+	for (const name of names)
+		test(`${provider} refuses ${name} at inherited and request environments without values`, () => {
+			for (const env of [{ [name]: "fixture-sensitive-value" }]) {
+				assert.deepEqual(conflictingEnvironment(env, provider), [name]);
+				assert.throws(
+					() => assertInvocationEnvironment(provider, undefined, env),
+					(e: Error) => /refused/.test(e.message) && !e.message.includes("fixture-sensitive-value"),
+				);
+				assert.throws(() => assertInvocationEnvironment(provider, { env }, {}), /refused/);
+			}
+		});
+}
+
+test("billing environment guards affect only the runtime being started", () => {
+	assert.doesNotThrow(() => assertEnvironment("openai-codex", { ANTHROPIC_API_KEY: "fixture" }));
+	assert.doesNotThrow(() => assertEnvironment(ACP_PROVIDER, { ANTHROPIC_API_KEY: "fixture" }));
+	assert.doesNotThrow(() => assertEnvironment(CLAUDE_ACP_PROVIDER, { GEMINI_API_KEY: "fixture" }));
+	for (const provider of [CLAUDE_ACP_PROVIDER, ACP_PROVIDER])
+		assert.doesNotThrow(() =>
+			assertInvocationEnvironment(
+				provider,
+				{
+					env: {
+						HTTPS_PROXY: "fixture",
+						NODE_OPTIONS: "fixture",
+						LD_PRELOAD: "fixture",
+						LANG: "C",
+					},
+				},
+				{},
+			),
+		);
+});
+
+test("profile validates retained fields and allows native model resources", () => {
+	const profile = mkdtempSync(join(tmpdir(), "poly-profile-"));
+	bootstrap(profile);
+	writeFileSync(join(profile, "models.json"), "{}");
+	assert.doesNotThrow(() => validateProfile(profile));
+	assert.throws(() => validatePolicy({ version: 1, claude: { enabled: "yes" } }), /activation/);
 	assert.throws(
-		() => assertEnvironment(env),
-		(error: Error) => !/fixture|secret@/.test(error.message),
+		() => validatePolicy({ version: 1, google: { enabled: true, path: "relative" } }),
+		/absolute/,
+	);
+	assert.throws(
+		() => validatePolicy({ version: 1, claude: { enabled: true, mode: "invalid" } }),
+		/mode/,
+	);
+	const sibling = join(profile, "alias");
+	symlinkSync(profile, sibling);
+	assert.throws(() => bootstrap(sibling), /symlink/);
+	writeFileSync(join(profile, "poly.json"), "not-json-sensitive-value");
+	assert.throws(
+		() => readConfiguration(join(profile, "poly.json")),
+		(e: Error) => !e.message.includes("sensitive-value"),
 	);
 });
 
-test("native Claude authentication overrides and malformed configuration are refused without value exposure", () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-claude-settings-"));
-	const file = join(root, "settings.json");
-	writeFileSync(file, JSON.stringify({ apiKeyHelper: "fixture helper, never execute" }));
-	assert.throws(() => validateClaudeSettings(root), /authentication override/);
-	writeFileSync(file, JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://fixture.example" } }));
-	assert.throws(() => validateClaudeSettings(root), /conflicting environment/);
-	writeFileSync(file, "invalid JSON fixture-sensitive-content");
-	assert.throws(
-		() => readConfiguration(file),
-		(error: Error) => !error.message.includes("fixture-sensitive-content"),
-	);
-});
-
-test("stream guards reject before invoking native transports, with no API fallback", () => {
-	let calls = 0;
+test("native stream guards refuse before transport and preserve bounded retries and endpoints", () => {
 	const provider = openaiCodexProvider();
+	let calls = 0;
 	const guarded = guardedProvider(
 		{
 			...provider,
-			streamSimple: () => {
+			streamSimple: (_m: any, _c: any, options: any) => {
 				calls++;
-				throw new Error("transport called");
+				assert.equal(options.maxRetries, 0);
+				return {} as any;
 			},
 		},
-		() => {
-			throw new Error("blocked");
-		},
+		() => {},
 	);
+	guarded.streamSimple(provider.getModels()[0], normalizeContext({ messages: [] }));
 	assert.throws(
-		() => guarded.streamSimple(provider.getModels()[0], normalizeContext({ messages: [] })),
-		/blocked/,
+		() =>
+			guarded.streamSimple(
+				{ ...provider.getModels()[0], baseUrl: "https://unselected.invalid" },
+				normalizeContext({ messages: [] }),
+			),
+		/endpoint/,
 	);
-	assert.equal(calls, 0);
+	assert.equal(calls, 1);
 });
 
-test("launcher rejects automation flags and preserves project settings", () => {
+test("launcher accepts native resources and session references but refuses automated prompts", () => {
 	assert.throws(() => assertNode("22.16.0"), /22.19/);
 	assert.doesNotThrow(() => assertNode("22.21.1"));
 	assert.ok(
-		!launchArguments(["--continue", "--model", "openai-codex/example"]).includes("--no-extensions"),
+		launchArguments(["--session", "/tmp/fixture-session", "--theme", "fixture"]).includes(
+			"/tmp/fixture-session",
+		),
 	);
-	for (const args of [
-		["-p", "prompt"],
-		["--mode", "rpc"],
-		["--provider", "google"],
-		["delegated task"],
-	])
+	for (const args of [["-p", "prompt"], ["--mode", "rpc"], ["automated prompt"]])
 		assert.throws(() => launchArguments(args));
-	const root = mkdtempSync(join(tmpdir(), "poly-project-"));
-	mkdirSync(join(root, ".pi"));
-	writeFileSync(join(root, ".pi/settings.json"), '{"packages":["personal"]}');
-	assert.doesNotThrow(() => assertProjectConfiguration(root));
-	assert.equal(readFileSync(join(root, ".pi/settings.json"), "utf8"), '{"packages":["personal"]}');
-});
-
-test("Pi owns durable session creation and restoration", () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-session-"));
-	const session = SessionManager.create(root, join(root, "sessions"));
-	session.appendMessage({ role: "user", content: "fixture task", timestamp: Date.now() });
-	session.appendCustomEntry("poly-handoff", { objective: "fixture objective" });
-	const restored = SessionManager.open(session.getSessionFile()!);
-	assert.equal(restored.getSessionId(), session.getSessionId());
-	assert.equal(restored.getBranch().filter((e) => e.type === "custom").length, 1);
+	const project = mkdtempSync(join(tmpdir(), "poly-project-"));
+	mkdirSync(join(project, ".pi"));
+	writeFileSync(
+		join(project, ".pi/settings.json"),
+		JSON.stringify({ packages: ["./native"], httpProxy: "fixture" }),
+	);
+	assert.doesNotThrow(() => assertProjectConfiguration(project));
 });

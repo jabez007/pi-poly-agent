@@ -1,16 +1,9 @@
-import { loadIntegrations } from "./platform/integrations.ts";
 import { doctor, formatDoctor } from "./doctor.ts";
-import { loadPlatform } from "./platform/config.ts";
-import { ProviderRegistry, nativeWorkerProvider } from "./platform/providers.ts";
-import { ContextRegistry, nativeContext, memPalaceContext } from "./platform/context.ts";
-import type { ContextBackend } from "./platform/context.ts";
-import type { WorkerResources } from "./platform/contracts.ts";
-import { focusedContext } from "./orchestration/context.ts";
 import { draftHandoff, handoffMarkdown, parseHandoffMarkdown } from "./handoff.ts";
-import { registerOrchestration } from "./orchestration/extension.ts";
 import { registerClaudeBridge } from "./providers/claude.ts";
 import { registerClaudeAcp } from "./providers/claude-acp-extension.ts";
-import { CLAUDE_ACP_PROVIDER } from "./policy.ts";
+import { CLAUDE_ACP_PROVIDER, claudeMode, NATIVE_PROVIDERS } from "./policy.ts";
+import { directPrompts } from "./providers/direct-input.ts";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type {
 	ExtensionAPI,
@@ -20,20 +13,18 @@ import type {
 import {
 	ACP_PROVIDER,
 	BRIDGE_PROVIDER,
-	assertEnvironment,
 	assertInvocationEnvironment,
 	assertRequest,
 	guardedProvider,
 	providerStatus,
 } from "./policy.ts";
+import { PROFILE, loadPolicy, validateProfile, validateProjectSafetySettings } from "./profile.ts";
 import {
-	PROFILE,
-	loadPolicy,
-	validateProfile,
-	validateClaudeSettings,
-	validateProjectSafetySettings,
-} from "./profile.ts";
-import { AcpSession, officialAcpFactory, type AcpFactory } from "./providers/acp.ts";
+	AcpRuntimeError,
+	AcpSession,
+	officialAcpFactory,
+	type AcpFactory,
+} from "./providers/acp.ts";
 import { acpStream } from "./providers/stream.ts";
 import {
 	connectMemPalace,
@@ -49,34 +40,18 @@ import {
 export default async function polyExtension(
 	pi: ExtensionAPI,
 	acpFactory?: AcpFactory,
-	integrations: {
-		providers?: ProviderRegistry;
-		context?: ContextBackend[];
-		resources?: WorkerResources;
-	} = {},
+	claudeFactory?: AcpFactory,
 ): Promise<void> {
-	const profile = process.env.PI_POLY_PROFILE || PROFILE;
+	const profile = process.env.PI_POLY_PROFILE || process.env.PI_CODING_AGENT_DIR || PROFILE;
 	pi.registerCommand("poly-doctor", {
 		description: "Inspect configuration, resources and eligibility without executing a provider",
 		handler: async (_args, context) =>
 			context.ui.notify(formatDoctor(await doctor(profile, context.cwd)), "info"),
 	});
 	const policy = validateProfile(profile);
-	const platform = loadPlatform(profile);
-	const memoryEnabled = usesMemPalace(platform, policy.memory.enabled);
-	const providers = integrations.providers || new ProviderRegistry(() => loadPolicy(profile));
-	const installed = await loadIntegrations(profile, providers, {
-		registerCommand: pi.registerCommand.bind(pi),
-		on: pi.on.bind(pi),
-	});
-	for (const instance of platform.providers) providers.register(instance);
-	const contexts = new ContextRegistry();
-	contexts.register(nativeContext(() => focusedContext(handoff, "")));
-	contexts.register(memPalaceContext(policy.memory.sharedWings));
-	for (const backend of [...installed.context, ...(integrations.context || [])])
-		contexts.register(backend);
+	const memoryEnabled = policy.memory.enabled;
+	const input = directPrompts(pi);
 	let ctx: ExtensionContext;
-	let directPrompt: string | undefined;
 	let acp: AcpSession | undefined;
 	let memoryTransport: MemoryTransport | undefined;
 	let recalled = "";
@@ -85,49 +60,20 @@ export default async function polyExtension(
 	let acpBinding: { sessionId: string; cwd: string } | undefined;
 
 	const check = (provider: string) => {
-		assertEnvironment(process.env);
 		if (ctx) validateProjectSafetySettings(ctx.cwd);
-		if (provider === BRIDGE_PROVIDER) validateClaudeSettings();
-		assertRequest(provider, loadPolicy(profile));
+		if (provider === BRIDGE_PROVIDER) input.require(provider);
+		assertRequest(provider, loadPolicy(profile), true);
 	};
-	for (const provider of builtinProviders()) {
-		if (["openai-codex", "kimi-coding", "zai"].includes(provider.id)) continue;
-		pi.registerProvider({
-			...provider,
-			auth: {
-				apiKey: {
-					name: "Disabled in managed profile",
-					check: async () => undefined,
-					resolve: async () => undefined,
-				},
-			},
-			getModels: () => [],
-			getAllModels: () => [],
-			refreshModels: undefined,
-			generateImages: undefined,
-			classify: undefined,
-			stream: () => {
-				throw new Error("Provider disabled in managed profile");
-			},
-			streamSimple: () => {
-				throw new Error("Provider disabled in managed profile");
-			},
-		});
+	for (const id of NATIVE_PROVIDERS) {
+		const provider = builtinProviders().find((p) => p.id === id)!;
+		const auth = { ...provider.auth };
+		if (id === "kimi-coding" && !policy.kimiApiKey) auth.apiKey = undefined;
+		pi.registerProvider(guardedProvider({ ...provider, auth }, () => check(id)));
 	}
-	const codex = nativeWorkerProvider("openai-codex");
-	pi.registerProvider(guardedProvider(codex, () => check(codex.id)));
-	const kimi = nativeWorkerProvider("kimi-coding");
-	if (!policy.kimiApiKey) kimi.auth.apiKey = undefined;
-	pi.registerProvider(guardedProvider(kimi, () => check(kimi.id)));
-	const zai = nativeWorkerProvider("zai");
-	pi.registerProvider(guardedProvider(zai, () => check(zai.id)));
-
-	registerInstanceProviders(pi, providers);
-
 	await registerClaudeBridge(
 		pi,
 		profile,
-		{ ...policy.claude, enabled: providers.capabilities(BRIDGE_PROVIDER).direct },
+		{ ...policy.claude, enabled: policy.claude.enabled && claudeMode(policy) === "bridge" },
 		() => check(BRIDGE_PROVIDER),
 	);
 
@@ -150,15 +96,10 @@ export default async function polyExtension(
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})),
 		streamSimple: (model, context, options) => {
-			assertInvocationEnvironment(options);
-			assertRequest(
-				ACP_PROVIDER,
-				loadPolicy(profile),
-				ctx?.hasUI && ctx.mode === "tui" && directPrompt !== undefined,
-			);
+			assertInvocationEnvironment(ACP_PROVIDER, options);
+			assertRequest(ACP_PROVIDER, loadPolicy(profile), true);
+			const prompt = input.consume(ACP_PROVIDER);
 			if (!acp) throw new Error("Run /poly-google-discover first");
-			const prompt = directPrompt!;
-			directPrompt = undefined; // A capability consumed by exactly one provider request.
 			return acpStream(acp, model, context, options, prompt);
 		},
 	});
@@ -191,7 +132,6 @@ export default async function polyExtension(
 	pi.on("session_start", async (_event, context) => {
 		acp?.close();
 		acp = undefined;
-		directPrompt = undefined;
 		handoff = undefined;
 		savedDigest = "";
 		acpBinding = undefined;
@@ -206,45 +146,11 @@ export default async function polyExtension(
 			if (entry.type === "custom" && entry.customType === "poly-checkpoint")
 				savedDigest = String(entry.data);
 		}
-		context.ui.setStatus(
-			"poly",
-			activeProviderStatus(context.model?.provider || "no provider", providers, policy),
-		);
+		context.ui.setStatus("poly", providerStatus(context.model?.provider || "no provider", policy));
 		await recall(context);
 	});
-	pi.on("input", (event, context) => {
-		directPrompt = undefined;
-		if (context.model?.provider !== ACP_PROVIDER) return { action: "continue" };
-		if (event.source !== "interactive" || !context.hasUI || context.mode !== "tui") {
-			context.ui.notify("Google ACP accepts direct interactive user input only.", "error");
-			return { action: "handled" };
-		}
-		if (event.streamingBehavior) {
-			context.ui.notify(
-				"Wait for or cancel the current Google turn before submitting another prompt.",
-				"warning",
-			);
-			return { action: "handled" };
-		}
-		if (event.images?.length || event.text.startsWith("!")) {
-			context.ui.notify(
-				"This ACP slice accepts text prompts. Shell commands and image prompts are not forwarded.",
-				"warning",
-			);
-			return { action: "handled" };
-		}
-		directPrompt = event.text;
-		return { action: "continue" };
-	});
-	pi.on("agent_settled", () => {
-		directPrompt = undefined;
-	});
 	pi.on("model_select", async (_event, context) => {
-		directPrompt = undefined;
-		context.ui.setStatus(
-			"poly",
-			activeProviderStatus(context.model?.provider || "no provider", providers, policy),
-		);
+		context.ui.setStatus("poly", providerStatus(context.model?.provider || "no provider", policy));
 		await recall(context);
 	});
 	pi.on("tool_call", async (event, context) => {
@@ -265,55 +171,57 @@ export default async function polyExtension(
 	});
 	pi.registerCommand("poly-status", {
 		description: "Show provider authentication paths and activation state",
-		handler: async (_args, context) =>
+		handler: async (_args, context) => {
+			const current = loadPolicy(profile);
 			context.ui.notify(
 				[
-					"openai-codex: native ChatGPT OAuth",
-					`kimi-coding: native OAuth${policy.kimiApiKey ? " or explicitly allowed coding-plan key" : " only"}`,
-					`zai: coding-plan key ${policy.zaiCodingPlan ? "allowed" : "locked"}`,
-					providerStatus(CLAUDE_ACP_PROVIDER, policy),
-					providerStatus(BRIDGE_PROVIDER, policy),
-					`antigravity-acp: direct user only, ${policy.google.enabled ? "activated, live unverified" : "locked"}`,
-					`memory: ${memoryEnabled ? "enabled" : "optional, disabled"}`,
+					...[...NATIVE_PROVIDERS, CLAUDE_ACP_PROVIDER, BRIDGE_PROVIDER, ACP_PROVIDER].map((id) =>
+						providerStatus(id, current),
+					),
+					`memory: ${current.memory.enabled ? "enabled" : "optional, disabled"}`,
 				].join("\n"),
 				"info",
-			),
+			);
+		},
 	});
 	pi.registerCommand("poly-google-discover", {
-		description: "Explicitly start the reviewed official ACP runtime and discover Gemini models",
+		description: "Explicitly start Antigravity ACP and discover Gemini models",
 		handler: async (args, context) => {
-			assertRequest(ACP_PROVIDER, policy, context.hasUI && context.mode === "tui");
-			if (
-				!(await context.ui.confirm(
-					"Start official Google ACP?",
-					"This is a live, authenticated runtime operation. Continue?",
-				))
-			)
-				return;
-			acp?.close();
-			acp = new AcpSession(
-				acpFactory || officialAcpFactory(policy.google, context.cwd),
-				context.cwd,
-				(title, choices) => context.ui.select(title, choices),
-				{
-					saved: acpBinding,
-					save: (binding) => {
-						acpBinding = binding;
-						pi.appendEntry("poly-acp-binding", binding);
-					},
-					report: (message) => context.ui.notify(message, "info"),
-				},
-			);
 			try {
+				assertRequest(ACP_PROVIDER, loadPolicy(profile), context.hasUI && context.mode === "tui");
+				assertInvocationEnvironment(ACP_PROVIDER);
+				if (
+					!(await context.ui.confirm(
+						"Start official Google ACP?",
+						"This is a live, authenticated runtime operation. Continue?",
+					))
+				)
+					return;
+				acp?.close();
+				acp = new AcpSession(
+					acpFactory || officialAcpFactory(loadPolicy(profile).google, context.cwd),
+					context.cwd,
+					(title, choices) => context.ui.select(title, choices),
+					{
+						saved: acpBinding,
+						save: (binding) => {
+							acpBinding = binding;
+							pi.appendEntry("poly-acp-binding", binding);
+						},
+						report: (message) => context.ui.notify(message, "info"),
+					},
+				);
 				const models = await acp.discover(args.trim() === "new");
 				if (!models.length) throw new Error("No Gemini models");
 				pi.registerProvider(ACP_PROVIDER, googleConfig(models));
 				context.ui.notify("Gemini models discovered. Choose one with /model.", "info");
-			} catch {
-				acp.close();
+			} catch (error) {
+				acp?.close();
 				acp = undefined;
 				context.ui.notify(
-					"ACP discovery failed. Check the reviewed official runtime and native login.",
+					error instanceof AcpRuntimeError
+						? error.message
+						: "ACP discovery failed. Check poly.json, the runtime path and native login.",
 					"error",
 				);
 			}
@@ -437,80 +345,15 @@ export default async function polyExtension(
 		);
 		if (!allowed) {
 			context.ui.notify(
-				"Compaction canceled. Prepare /handoff and enable MemPalace for an explicit checkpoint. Direct-only ACP and automatic recovery compaction remain disabled.",
+				"Compaction canceled. Prepare /handoff and enable MemPalace for an explicit checkpoint. Claude, Gemini and automatic recovery compaction remain disabled.",
 				"warning",
 			);
 			return { cancel: true };
 		}
 	});
-	registerOrchestration(
-		pi,
-		profile,
-		async (brief, sources) => {
-			if (!ctx) return focusedContext(handoff, "");
-			const configuration = loadPlatform(profile, ctx.cwd);
-			const selected = configuration.context;
-			const configured =
-				configuration.legacy && memoryEnabled
-					? [...selected, "mempalace"]
-					: selected.filter((id) => id !== "mempalace" || memoryEnabled);
-			const ids = sources ? configured.filter((id) => sources.includes(id)) : configured;
-			const result = await contexts.retrieve(ids, {
-				project: projectIdentity(ctx.cwd).wing,
-				objective: brief || "current project task",
-				budget: 14000,
-			});
-			if (result.unavailable.length)
-				ctx.ui.notify(
-					`Context unavailable: ${result.unavailable.join(", ")}. Local task execution remains available.`,
-					"warning",
-				);
-			return result.text;
-		},
-		undefined,
-		{ providers, resources: integrations.resources || installed.resources },
-	);
 	pi.on("session_shutdown", async () => {
 		acp?.close();
 		await memoryTransport?.close();
-		await contexts.close();
 	});
-	registerClaudeAcp(pi, profile);
-}
-
-function registerInstanceProviders(pi: ExtensionAPI, providers: ProviderRegistry): void {
-	for (const instance of providers
-		.list()
-		.filter(
-			(p) =>
-				![
-					"openai-codex",
-					"kimi-coding",
-					"zai",
-					BRIDGE_PROVIDER,
-					CLAUDE_ACP_PROVIDER,
-					ACP_PROVIDER,
-				].includes(p.id),
-		)) {
-		if (instance.enabled) pi.registerProvider(providers.provider(instance.id, true));
-	}
-}
-
-function activeProviderStatus(
-	id: string,
-	providers: ProviderRegistry,
-	policy: Parameters<typeof providerStatus>[1],
-): string {
-	try {
-		const instance = providers.get(id);
-		if (["local", "api"].includes(instance.billing))
-			return `Poly | ${id} | ${instance.billing} | ${providers.capabilities(id).delegation ? "worker eligible" : "direct only"}`;
-	} catch {
-		/* Pi can display an unavailable historical model. */
-	}
-	return providerStatus(id, policy);
-}
-
-function usesMemPalace(platform: ReturnType<typeof loadPlatform>, enabled: boolean): boolean {
-	return enabled && (platform.legacy || platform.context.includes("mempalace"));
+	registerClaudeAcp(pi, profile, claudeFactory, input);
 }

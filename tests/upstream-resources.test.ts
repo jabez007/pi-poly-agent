@@ -16,9 +16,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { loadThemeFromPath } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { bootstrap } from "../src/profile.ts";
-import { git } from "../src/orchestration/worktrees.ts";
-import { nativeWorkerInstructions } from "../src/platform/pi-resources.ts";
-import type { Task } from "../src/orchestration/tasks.ts";
+import { execFileSync } from "node:child_process";
+const git = (cwd: string, args: string[]) =>
+	execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 import { deterministicProvider } from "./fixtures/deterministic-provider.ts";
 
 const upstream = resolve("node_modules/@earendil-works/pi-coding-agent/examples/extensions");
@@ -29,7 +29,6 @@ async function host(pkg: string, extraExtensions: string[] = []) {
 		project = join(root, "project");
 	bootstrap(profile);
 	mkdirSync(project);
-	json(join(profile, "platform.json"), { version: 1, recipes: ["minimal"] });
 	git(project, ["init", "-b", "main"]);
 	git(project, ["config", "user.name", "Fixture"]);
 	git(project, ["config", "user.email", "fixture@example.invalid"]);
@@ -183,25 +182,6 @@ test("unmodified Pi 1.5.2 session, todo, status and dynamic resources coexist wi
 		assert.match(JSON.stringify(restored.content), /Verify native package/);
 		assert.ok(h.loader.getSkills().skills.some((s) => s.name === "dynamic-resources"));
 		assert.ok(h.loader.getPrompts().prompts.some((p) => p.name === "dynamic"));
-		const task = {
-			role: {
-				name: "reader",
-				editing: false,
-				instructions: "",
-				policy: { skills: ["pi:skill:dynamic-resources"] },
-			},
-			workspace: { root: h.project },
-		} as Task;
-		await assert.rejects(nativeWorkerInstructions(task, h.profile), /unavailable/);
-		const settings = JSON.parse(readFileSync(join(h.profile, "settings.json"), "utf8"));
-		json(join(h.profile, "settings.json"), {
-			...settings,
-			skills: [join(pkg, "extensions/dynamic-resources/SKILL.md")],
-		});
-		assert.match(
-			(await nativeWorkerInstructions(task, h.profile))["pi:skill:dynamic-resources"],
-			/Dynamic Resources Skill/,
-		);
 	} finally {
 		h.close();
 	}
@@ -271,7 +251,7 @@ test("the pinned real template package executes commands/tools and a selection w
 	}
 });
 
-test("a real SDK host activates project-local commands and worker instructions only after saved native trust", async () => {
+test("a real SDK host activates project-local commands and skills only after saved native trust", async () => {
 	const h = await host(resolve("tests/fixtures/vendor/pi-package-template"));
 	try {
 		mkdirSync(join(h.project, ".pi/extensions"), { recursive: true });
@@ -294,19 +274,7 @@ test("a real SDK host activates project-local commands and worker instructions o
 		assert.ok(h.session.extensionRunner.getCommand("project-evidence"));
 		await h.session.prompt("/project-evidence");
 		assert.ok(h.notices.includes("Project evidence loaded"));
-		const task = {
-			role: {
-				name: "local-reader",
-				editing: false,
-				instructions: "",
-				policy: { skills: ["pi:skill:project-evidence"] },
-			},
-			workspace: { root: h.project },
-		} as Task;
-		assert.match(
-			(await nativeWorkerInstructions(task, h.profile))["pi:skill:project-evidence"],
-			/Read approved/,
-		);
+		assert.ok(h.loader.getSkills().skills.some((s) => s.name === "project-evidence"));
 	} finally {
 		h.close();
 	}

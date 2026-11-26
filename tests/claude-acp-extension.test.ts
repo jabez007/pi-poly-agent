@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,9 +30,7 @@ async function setup(t: TestContext) {
 	const policy = defaultPolicy();
 	policy.claude = {
 		enabled: true,
-		review: "2026-11-25.1",
-		runtime,
-		sha256: createHash("sha256").update("fixture").digest("hex"),
+		path: runtime,
 	};
 	writeFileSync(join(profile, "poly.json"), JSON.stringify(policy));
 	const commands = new Map<string, any>();
@@ -148,7 +145,7 @@ test("Claude ACP command restores its own binding only after confirmation and mo
 	await f.commands.get("poly-claude-mode").handler("plan", f.ctx);
 	assert.equal(f.requests.at(-1)!.params.modeId, "plan");
 	await f.commands.get("poly-claude-mode").handler("auto", f.ctx);
-	assert.match(f.notices.at(-1)!, /mode refused/);
+	assert.match(f.notices.at(-1)!, /offered mode/);
 	for (const handler of f.handlers.get("session_start") || []) await handler({}, f.ctx);
 	await f.commands.get("poly-claude-discover").handler("", f.ctx);
 	assert.ok(f.requests.some((r) => r.method === "session/load"));

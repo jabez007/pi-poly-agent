@@ -190,7 +190,7 @@ test("ACP restores advertised sessions, preserves failed bindings, and requires 
 	}
 });
 
-test("memory failure is explicit and does not affect independent task execution", async () => {
+test("memory transport failure is reported to its caller", async () => {
 	const memory = new ProjectMemory(
 		{
 			call: async () => {

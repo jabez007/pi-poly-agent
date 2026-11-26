@@ -1,5 +1,5 @@
 import { createAssistantMessageEventStream, type Provider } from "@earendil-works/pi-ai";
-import { nativeWorkerProvider } from "../../src/platform/providers.ts";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 
 /** A transport fixture only. Pi still owns sessions, the agent loop and tool execution. */
 export function deterministicProvider(
@@ -7,7 +7,7 @@ export function deterministicProvider(
 	respond: (context: any) => any[],
 	observe: (options: any) => void = () => {},
 ): Provider {
-	const base = nativeWorkerProvider(id);
+	const base = builtinProviders().find((p) => p.id === id)!;
 	const model = { ...base.getModels()[0], id: "fixture", provider: id };
 	const stream = (_model: any, context: any, options: any) => {
 		observe(options);

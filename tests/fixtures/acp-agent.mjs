@@ -14,10 +14,6 @@ const app = agent({ name: "fixture" })
 			authMethods: [{ id: "oauth-personal", name: "Fixture native auth" }],
 		};
 	})
-	.onRequest("authenticate", ({ params }) => {
-		if (params.methodId !== "oauth-personal") throw new Error("Wrong authentication path");
-		return {};
-	})
 	.onRequest("session/new", () => ({
 		sessionId: "fixture-process",
 		modes: { currentModeId: "default", availableModes: [{ id: "default", name: "Ask" }] },

@@ -1,6 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { validateHandoff, type Handoff } from "./memory.ts";
-import type { Task } from "./orchestration/tasks.ts";
 
 function entryForm(value: string): string {
 	return value.replace(/\r\n?|\n/g, " ").trim();
@@ -28,41 +27,29 @@ export function draftHandoff(
 	memory: string,
 	previous?: Handoff,
 ): Handoff {
+	const prior = previous || {
+		objective: "Describe the current objective",
+		completed: [],
+		decisions: [],
+		questions: [],
+		files: [],
+		facts: [],
+	};
 	const users = entries.filter((e) => e.type === "message" && e.message.role === "user");
-	const objective = users.length
-		? entryText(users.at(-1)!).slice(0, 2000)
-		: previous?.objective || "Describe the current objective";
-	const tasks = entries
-		.filter((e) => e.type === "custom" && e.customType === "poly-task-complete")
-		.map((e) => (e as any).data as Task)
-		.filter((t) => t.status === "completed" && t.result);
-	const files = uniqueEntries([
-		...(previous ? previous.files : []),
-		...tasks.flatMap((t) => t.result!.files),
-	]);
+	const objective = users.length ? entryText(users.at(-1)!).slice(0, 2000) : prior.objective;
 	const recent = entries
 		.filter((e) => e.type === "message" && e.message.role === "assistant")
 		.slice(-2)
 		.map(entryText)
 		.filter(Boolean);
-	const findings = tasks.flatMap((task) =>
-		task.result!.findings.map((f) => ({
-			text: f.text,
-			source: `${f.source} (task ${task.id}, ${task.provider}/${task.model})`,
-			verified: false,
-		})),
-	);
 	return validateHandoff({
 		version: 1,
 		objective,
-		completed: uniqueEntries(tasks.map((t) => `${t.id}: ${t.result!.summary}`)),
-		decisions: uniqueEntries(previous?.decisions || []),
-		questions: uniqueEntries([
-			...(previous?.questions || []),
-			...tasks.flatMap((t) => t.result!.questions),
-		]),
-		files,
-		facts: uniqueFacts([...(previous?.facts || []), ...findings]),
+		completed: uniqueEntries(prior.completed),
+		decisions: uniqueEntries(prior.decisions),
+		questions: uniqueEntries(prior.questions),
+		files: uniqueEntries(prior.files),
+		facts: uniqueFacts(prior.facts),
 		hypotheses: [
 			...recent.map((text) => `Agent summary, unverified: ${text.slice(0, 1500)}`),
 			...(memory

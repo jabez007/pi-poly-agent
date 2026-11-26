@@ -7,7 +7,8 @@ import {
 	renderMemory,
 } from "./memory-context.ts";
 import { createHash } from "node:crypto";
-import { git as hostGit } from "./orchestration/worktrees.ts";
+import { execFileSync } from "node:child_process";
+import { directOnlyProvider } from "./policy.ts";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -93,7 +94,20 @@ function validateFacts(facts: Handoff["facts"]): void {
 
 function git(cwd: string, args: string[]): string {
 	try {
-		return hostGit(cwd, args);
+		return execFileSync(
+			"git",
+			["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
+			{
+				cwd,
+				env: Object.fromEntries(
+					Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+				),
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 10000,
+				maxBuffer: 65536,
+			},
+		).trim();
 	} catch {
 		return "unknown";
 	}
@@ -253,7 +267,7 @@ export async function checkpointBeforeCompaction(
 		!input.manual ||
 		input.willRetry ||
 		!input.interactive ||
-		["antigravity-acp", "claude-acp"].includes(input.provider) ||
+		directOnlyProvider(input.provider) ||
 		!input.memoryEnabled ||
 		!input.handoff
 	)

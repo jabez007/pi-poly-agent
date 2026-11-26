@@ -41,7 +41,7 @@ test("doctor reports missing configuration without creating a profile or exposin
 	assert.ok(!JSON.stringify(report).includes("fixture-never-print-this-value"));
 });
 
-test("doctor discovers native resources and actual configuration origins without executing trusted code", async () => {
+test("doctor discovers native resources and retired configuration without executing trusted code", async () => {
 	const root = mkdtempSync(join(tmpdir(), "poly-doctor-trust-"));
 	const profile = join(root, "profile");
 	bootstrap(profile);
@@ -66,11 +66,6 @@ test("doctor discovers native resources and actual configuration origins without
 		true,
 	);
 	assert.equal(report.checks.find((c) => c.id === "native-trust")!.status, "error");
-	assert.equal((report.configuration as any).agents[0].name, "auditor");
-	assert.deepEqual(
-		(report.configuration as any).sources.map((s: any) => s.kind),
-		["recipe", "profile"],
-	);
 	assert.equal(existsSync(marker), false);
 	assert.equal(existsSync(join(profile, "auth.json")), false);
 	assert.equal(readFileSync(join(profile, "settings.json"), "utf8"), settings);
@@ -88,17 +83,17 @@ test("explicit profile/project paths are scoped to the invocation and cannot be 
 	assert.throws(() => commandOptions(["doctor", "--profile", root, "--profile", root]));
 });
 
-test("CLI bootstrap and recipe selection preserve a separate development profile", () => {
+test("CLI bootstrap and validation preserve a separate development profile without recipes", () => {
 	const root = mkdtempSync(join(tmpdir(), "poly-onboarding-"));
 	const profile = join(root, "dev-agent");
-	const call = (command: string[]) =>
+	const call = (command: string) =>
 		spawnSync(
 			process.execPath,
 			[
 				"--import",
 				"tsx",
 				resolve("scripts/cli.ts"),
-				...command,
+				command,
 				"--profile",
 				profile,
 				"--project",
@@ -106,12 +101,11 @@ test("CLI bootstrap and recipe selection preserve a separate development profile
 			],
 			{ encoding: "utf8", timeout: 30000 },
 		);
-	assert.equal(call(["bootstrap"]).status, 0);
-	assert.equal(call(["recipe", "minimal"]).status, 0);
-	const before = readFileSync(join(profile, "platform.json"), "utf8");
-	assert.equal(call(["bootstrap"]).status, 0);
-	assert.notEqual(call(["recipe", "agent-team"]).status, 0);
-	assert.equal(readFileSync(join(profile, "platform.json"), "utf8"), before);
+	assert.equal(call("bootstrap").status, 0);
+	const before = readFileSync(join(profile, "poly.json"), "utf8");
+	assert.equal(call("bootstrap").status, 0);
+	assert.equal(call("validate").status, 0);
+	assert.equal(readFileSync(join(profile, "poly.json"), "utf8"), before);
 	assert.equal(existsSync(join(profile, "auth.json")), false);
 });
 
@@ -147,20 +141,23 @@ test("native inspection retains both user and trusted-project package scopes", a
 	]);
 });
 
-test("doctor rejects unknown or policy-ineligible agent assignments before worker creation", async () => {
-	const root = mkdtempSync(join(tmpdir(), "poly-agent-preflight-"));
-	bootstrap(root);
-	for (const model of [
-		"missing-instance/model",
-		"antigravity-acp/model",
-		"openai-codex/unknown-fixture-model",
-	]) {
-		writeFileSync(
-			join(root, "platform.json"),
-			JSON.stringify({ version: 1, agents: { specialist: { instructions: "Inspect", model } } }),
-		);
-		const report = await doctor(root, root);
-		assert.equal(report.checks.find((c) => c.id === "agent-specialist")?.status, "error");
+test("doctor reports enabled-runtime environment names without blocking unrelated providers or executing binaries", async () => {
+	const profile = mkdtempSync(join(tmpdir(), "poly-doctor-enabled-"));
+	bootstrap(profile);
+	const file = join(profile, "poly.json");
+	const policy = JSON.parse(readFileSync(file, "utf8"));
+	policy.claude = { enabled: true, path: join(profile, "missing-fixture-claude") };
+	writeFileSync(file, JSON.stringify(policy));
+	const previous = process.env.ANTHROPIC_API_KEY;
+	process.env.ANTHROPIC_API_KEY = "fixture-sensitive-value";
+	try {
+		const report = await doctor(profile, profile);
+		assert.equal(report.checks.find((c) => c.id === "claude-acp-environment")?.status, "warning");
+		assert.ok(!JSON.stringify(report).includes("fixture-sensitive-value"));
+		assert.ok(report.providers.some((p) => p.includes("openai-codex")));
+	} finally {
+		if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+		else process.env.ANTHROPIC_API_KEY = previous;
 	}
 });
 
@@ -173,6 +170,6 @@ test("doctor reports missing native packages without downloading or initializing
 		JSON.stringify({ ...settings, packages: ["npm:poly-nonexistent-fixture@1.0.0"] }),
 	);
 	const report = await doctor(root, root);
-	assert.equal(report.checks.find((c) => c.id === "native-packages")?.status, "warning");
+	assert.equal(report.resources?.packages[0].installedPath ? "ok" : "warning", "warning");
 	assert.equal(existsSync(join(root, "npm")), false);
 });

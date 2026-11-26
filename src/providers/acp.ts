@@ -10,8 +10,8 @@ import {
 	type NewSessionResponse,
 } from "@agentclientprotocol/sdk";
 import type { Activation } from "../policy.ts";
-import { attestRuntime } from "../profile.ts";
-import { assertEnvironment } from "../policy.ts";
+import { runtimePath } from "../profile.ts";
+import { ACP_PROVIDER, assertEnvironment } from "../policy.ts";
 import { assertNoSecrets } from "../memory.ts";
 
 export interface AcpPort {
@@ -33,8 +33,7 @@ export interface AcpRuntime {
 		request: AcpPort["request"],
 		params: any,
 	): Promise<void>;
-	modeAllowed?(mode: string): boolean;
-	validateSession?(session: NewSessionResponse): void;
+	provider: string;
 	error?(error: unknown, fallback: string): Error;
 	discoveryCommand: string;
 	command(
@@ -47,20 +46,26 @@ export interface AcpRuntime {
 	models(session: NewSessionResponse): { id: string; name: string; configId: string }[];
 }
 
+export class AcpRuntimeError extends Error {}
+export const GOOGLE_LOGIN_MESSAGE =
+	"Antigravity is not logged in. Run agy and sign in, then retry discovery.";
 export const GOOGLE_ACP_RUNTIME: AcpRuntime = {
+	provider: ACP_PROVIDER,
 	discoveryCommand: "poly-google-discover",
-	command: (activation) => ({ executable: attestRuntime(activation), args: ["acp"] }),
-	login: async (initialized, request) => {
+	command: (activation) => ({ executable: runtimePath(activation, "agy"), args: ["acp"] }),
+	login: async (initialized) => {
 		if (!initialized.authMethods?.some((method: { id: string }) => method.id === "oauth-personal"))
-			throw new Error("Runtime does not advertise native personal OAuth");
-		// Credentials and browser flow stay inside Google's runtime.
-		await request(
-			"authenticate",
-			{ methodId: "oauth-personal" },
-			{ signal: AbortSignal.timeout(120000) },
-		);
+			throw new AcpRuntimeError(GOOGLE_LOGIN_MESSAGE);
+		// Cached login belongs to agy. Never initiate an authentication flow from Pi.
 	},
+	beforeRequest: async () => assertEnvironment(ACP_PROVIDER),
 	models: (session) => configModels(session).filter((model) => /^gemini[-.]/i.test(model.id)),
+	error: (error, fallback) =>
+		error instanceof AcpRuntimeError
+			? error
+			: new AcpRuntimeError(
+					(error as { code?: number })?.code === -32000 ? GOOGLE_LOGIN_MESSAGE : fallback,
+				),
 };
 
 export function officialAcpFactory(
@@ -69,7 +74,8 @@ export function officialAcpFactory(
 	runtime: AcpRuntime = GOOGLE_ACP_RUNTIME,
 ): AcpFactory {
 	return async (handlers) => {
-		assertEnvironment(process.env);
+		if (!activation.enabled) throw new AcpRuntimeError("Runtime is off; enable it in poly.json");
+		assertEnvironment(runtime.provider);
 		const command = await runtime.command(activation, cwd);
 		const child = spawn(command.executable, command.args, {
 			cwd,
@@ -101,14 +107,13 @@ export function officialAcpFactory(
 				"initialize",
 				{
 					protocolVersion: PROTOCOL_VERSION,
-					clientInfo: { name: "pi-poly-agent", version: "0.1.0" },
+					clientInfo: { name: "pi-poly-agent", version: "0.6.0" },
 					clientCapabilities: {},
 				},
 				{ cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true },
 			);
 			const request: AcpPort["request"] = (method, params, options) => {
-				// Native Claude may be launched again by session and auth RPCs.
-				recheckExecutable(runtime, activation, command.env?.CLAUDE_CODE_EXECUTABLE, method, close);
+				assertEnvironment(runtime.provider);
 				return connection.agent.request(method, params, {
 					cancellationSignal: options?.signal,
 					stopWaitingOnCancel: true,
@@ -130,25 +135,6 @@ export function officialAcpFactory(
 			throw runtime.error?.(error, message) || new Error(message);
 		}
 	};
-}
-
-function recheckExecutable(
-	runtime: AcpRuntime,
-	activation: Activation,
-	pinned: string | undefined,
-	method: string,
-	close: () => void,
-): void {
-	if (!pinned || !["session/new", "session/load", "session/prompt", "auth/status"].includes(method))
-		return;
-	try {
-		if (attestRuntime(activation) !== pinned) throw new Error("Native runtime path changed");
-	} catch {
-		close();
-		const message =
-			"Reviewed Claude Code executable changed; complete a new review before retrying.";
-		throw runtime.error?.(undefined, message) || new Error(message);
-	}
 }
 
 export async function permissionDecision(
@@ -229,8 +215,6 @@ export class AcpSession {
 	private port?: AcpPort;
 	private session?: NewSessionResponse;
 	private active = false;
-	private restored = false;
-	private modeFailure?: Error;
 	private aborted?: AbortSignal;
 	private update: (event: SessionNotification) => void = () => {};
 
@@ -262,7 +246,6 @@ export class AcpSession {
 						: Promise.resolve({ outcome: { outcome: "cancelled" } }),
 			});
 			this.session = await this.openSession(fresh);
-			if (!this.restored) this.runtime.validateSession?.(this.session);
 			if (!this.session?.modes?.availableModes.some((mode) => mode.id === "default"))
 				throw new Error("Prompting mode unavailable");
 			await this.port.request(
@@ -273,21 +256,14 @@ export class AcpSession {
 			this.recovery?.save({ sessionId: this.session!.sessionId, cwd: this.cwd });
 		} catch (error) {
 			this.close();
-			const message = "ACP session initialization failed; prompting mode is required";
+			const message =
+				"ACP session initialization failed. Check the executable, native login and default mode.";
 			throw this.runtime.error?.(error, message) || new Error(message);
 		}
 	}
 
 	private receive(event: SessionNotification): void {
-		if (event.sessionId !== this.session?.sessionId) return;
-		const mode = updatedMode(event.update);
-		if (mode && this.runtime.modeAllowed && !this.runtime.modeAllowed(mode)) {
-			const message = "ACP runtime selected a forbidden permission mode";
-			this.modeFailure = this.runtime.error?.(undefined, message) || new Error(message);
-			this.port?.close();
-			return;
-		}
-		if (this.active) this.update(event);
+		if (event.sessionId === this.session?.sessionId && this.active) this.update(event);
 	}
 
 	private async openSession(fresh: boolean): Promise<NewSessionResponse> {
@@ -305,9 +281,6 @@ export class AcpSession {
 					{ sessionId: saved.sessionId, cwd: this.cwd, mcpServers: [] },
 					{ signal: AbortSignal.timeout(15000) },
 				);
-				if (this.runtime.modeAllowed && !this.runtime.modeAllowed(loaded.modes?.currentModeId))
-					throw new Error("Resumed ACP permission mode is forbidden");
-				this.restored = true;
 				this.recovery!.report(
 					"Official ACP session/load succeeded; local Pi history remains authoritative.",
 				);
@@ -328,16 +301,13 @@ export class AcpSession {
 	}
 
 	availableModes(): string[] {
-		return (this.session?.modes?.availableModes || [])
-			.map((mode) => mode.id)
-			.filter((mode) => this.runtime.modeAllowed?.(mode));
+		return (this.session?.modes?.availableModes || []).map((mode) => mode.id);
 	}
 
 	async selectMode(mode: string): Promise<void> {
 		if (
 			this.active ||
 			!this.session ||
-			!this.runtime.modeAllowed?.(mode) ||
 			!this.session.modes?.availableModes.some((entry) => entry.id === mode)
 		)
 			throw new Error("ACP permission mode is unavailable or forbidden");
@@ -351,10 +321,6 @@ export class AcpSession {
 			const message = "ACP permission mode change failed";
 			throw this.runtime.error?.(error, message) || new Error(message);
 		}
-	}
-
-	private assertMode(): void {
-		if (this.modeFailure) throw this.modeFailure;
 	}
 
 	async prompt(
@@ -371,7 +337,6 @@ export class AcpSession {
 		const selected = discoveredModels(this.session!, this.runtime).find((m) => m.id === model);
 		if (!selected) throw new Error("Model was not discovered from the official runtime");
 		if (signal?.aborted) throw new Error("Cancelled");
-		this.assertMode();
 		this.active = true;
 		this.aborted = signal;
 		this.update = update;
@@ -392,10 +357,11 @@ export class AcpSession {
 				{ sessionId: this.session!.sessionId, prompt: [{ type: "text", text }] },
 				{ signal },
 			);
-			this.assertMode();
 			return result.stopReason;
 		} catch (error) {
-			throw this.turnError(error);
+			this.close();
+			const message = "ACP turn failed or cancelled; no fallback attempted";
+			throw this.runtime.error?.(error, message) || new Error(message);
 		} finally {
 			this.active = false;
 			this.update = () => {};
@@ -403,26 +369,9 @@ export class AcpSession {
 		}
 	}
 
-	private turnError(error: unknown): Error {
-		const failure = this.modeFailure || error;
-		this.close();
-		const message = "ACP turn failed or cancelled; no fallback attempted";
-		return this.runtime.error?.(failure, message) || new Error(message);
-	}
-
 	close(): void {
 		this.port?.close();
 		this.port = undefined;
 		this.session = undefined;
-		this.restored = false;
-		this.modeFailure = undefined;
 	}
-}
-
-function updatedMode(update: SessionNotification["update"]): string | undefined {
-	const value = update as any;
-	return (
-		value.currentModeId ||
-		value.configOptions?.find((option: any) => option.id === "mode")?.currentValue
-	);
 }

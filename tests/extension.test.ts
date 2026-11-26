@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +7,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import extension from "../src/extension.ts";
 import { bootstrap } from "../src/profile.ts";
-import { defaultPolicy, POLICY_REVISION, conflictingEnvironment } from "../src/policy.ts";
+import { defaultPolicy } from "../src/policy.ts";
 import type { AcpHandlers } from "../src/providers/acp.ts";
 
 test("Pi registration, picker discovery, one-shot Google input gate, and approvals", async () => {
@@ -19,13 +18,9 @@ test("Pi registration, picker discovery, one-shot Google input gate, and approva
 	const policy = defaultPolicy();
 	policy.google = {
 		enabled: true,
-		review: POLICY_REVISION,
-		runtime,
-		sha256: createHash("sha256").update("fixture, never execute").digest("hex"),
+		path: runtime,
 	};
 	writeFileSync(join(root, "poly.json"), JSON.stringify(policy));
-	const savedEnv = { ...process.env };
-	for (const key of conflictingEnvironment(process.env)) delete process.env[key];
 	const previous = process.env.PI_POLY_PROFILE;
 	process.env.PI_POLY_PROFILE = root;
 	const handlers = new Map<string, any[]>();
@@ -99,8 +94,6 @@ test("Pi registration, picker discovery, one-shot Google input gate, and approva
 		assert.ok(
 			providers.has("openai-codex") && providers.has("kimi-coding") && providers.has("zai"),
 		);
-		assert.equal(providers.get("google").getModels().length, 0);
-		assert.equal(providers.get("google").auth.oauth, undefined);
 		assert.equal(providers.get("kimi-coding").auth.apiKey, undefined);
 		for (const h of handlers.get("session_start") || []) await h({}, context);
 		assert.equal(requests.length, 0, "startup never initializes Google");
@@ -134,7 +127,6 @@ test("Pi registration, picker discovery, one-shot Google input gate, and approva
 		assert.equal(result.block, true);
 		assert.ok(notifications.some((n) => n.includes("direct interactive")));
 	} finally {
-		for (const key of conflictingEnvironment(savedEnv)) process.env[key] = savedEnv[key];
 		if (previous === undefined) delete process.env.PI_POLY_PROFILE;
 		else process.env.PI_POLY_PROFILE = previous;
 	}

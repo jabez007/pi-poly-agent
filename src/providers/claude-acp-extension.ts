@@ -5,24 +5,24 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { CLAUDE_ACP_PROVIDER, assertInvocationEnvironment, assertRequest } from "../policy.ts";
 import { loadPolicy } from "../profile.ts";
-import { AcpSession, officialAcpFactory, type AcpFactory } from "./acp.ts";
-import { CLAUDE_ACP_RUNTIME, ClaudeAcpError } from "./claude-acp.ts";
-import { assertClaudeAcpSettings } from "./claude-acp-settings.ts";
+import { AcpRuntimeError, AcpSession, officialAcpFactory, type AcpFactory } from "./acp.ts";
+import { CLAUDE_ACP_RUNTIME } from "./claude-acp.ts";
+import { directPrompts } from "./direct-input.ts";
 import { acpStream } from "./stream.ts";
 
-/** Claude owns tools and private execution state. Only fresh human input crosses this seam. */
-export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: AcpFactory): void {
+export function registerClaudeAcp(
+	pi: ExtensionAPI,
+	profile: string,
+	factory?: AcpFactory,
+	input = directPrompts(pi),
+): void {
 	let session: AcpSession | undefined;
 	let binding: { sessionId: string; cwd: string } | undefined;
-	let directPrompt: string | undefined;
-	let context: ExtensionContext | undefined;
-	const check = async (ctx: ExtensionContext) => {
+	const check = (ctx: ExtensionContext) =>
 		assertRequest(CLAUDE_ACP_PROVIDER, loadPolicy(profile), ctx.hasUI && ctx.mode === "tui");
-		await assertClaudeAcpSettings(ctx.cwd);
-	};
 	const configure = (
 		models = [
-			{ id: "activation-required", name: "Claude ACP [locked or undiscovered]", configId: "model" },
+			{ id: "activation-required", name: "Claude ACP [off or undiscovered]", configId: "model" },
 		],
 	): ProviderConfig => ({
 		name: "Claude Code via ACP",
@@ -38,29 +38,24 @@ export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: A
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})),
 		streamSimple: (model, transcript, options) => {
-			assertInvocationEnvironment(options);
-			assertRequest(
-				CLAUDE_ACP_PROVIDER,
-				loadPolicy(profile),
-				!!context?.hasUI && context.mode === "tui" && directPrompt !== undefined,
-			);
-
+			assertInvocationEnvironment(CLAUDE_ACP_PROVIDER, options);
+			assertRequest(CLAUDE_ACP_PROVIDER, loadPolicy(profile), true);
+			const prompt = input.consume(CLAUDE_ACP_PROVIDER);
 			if (!session) throw new Error("Run /poly-claude-discover first");
-			const prompt = directPrompt!;
-			directPrompt = undefined;
 			return acpStream(session, model, transcript, options, prompt);
 		},
 	});
 	pi.registerProvider(CLAUDE_ACP_PROVIDER, configure());
 	pi.registerCommand("poly-claude-discover", {
-		description: "Explicitly start reviewed Claude Code ACP and discover its models",
+		description: "Start Claude Code ACP explicitly and discover its models",
 		handler: async (args, ctx) => {
 			try {
-				await check(ctx);
+				check(ctx);
+				assertInvocationEnvironment(CLAUDE_ACP_PROVIDER);
 				if (
 					!(await ctx.ui.confirm(
 						"Start Claude Code ACP?",
-						"This is a live, authenticated runtime operation. Continue?",
+						"This starts the native authenticated runtime. Continue?",
 					))
 				)
 					return;
@@ -68,7 +63,7 @@ export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: A
 				session = new AcpSession(
 					factory || officialAcpFactory(loadPolicy(profile).claude, ctx.cwd, CLAUDE_ACP_RUNTIME),
 					ctx.cwd,
-					(title, options) => ctx.ui.select(title, options),
+					(title, choices) => ctx.ui.select(title, choices),
 					{
 						saved: binding,
 						save: (next) => {
@@ -87,19 +82,19 @@ export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: A
 				session?.close();
 				session = undefined;
 				ctx.ui.notify(
-					error instanceof ClaudeAcpError
+					error instanceof AcpRuntimeError
 						? error.message
-						: "Claude ACP discovery refused. Check activation, native default permission mode, settings, checksum and login.",
+						: "Claude ACP discovery refused. Check poly.json, the runtime path and native login.",
 					"error",
 				);
 			}
 		},
 	});
 	pi.registerCommand("poly-claude-mode", {
-		description: "Select a permitted Claude Code mode for the current ACP session",
+		description: "Select a mode offered by the current Claude Code session",
 		handler: async (args, ctx) => {
 			try {
-				await check(ctx);
+				check(ctx);
 				if (!session) throw new Error("Discovery required");
 				const mode =
 					args.trim() ||
@@ -107,9 +102,9 @@ export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: A
 				if (mode) await session.selectMode(mode);
 			} catch (error) {
 				ctx.ui.notify(
-					error instanceof ClaudeAcpError
+					error instanceof AcpRuntimeError
 						? error.message
-						: "Claude ACP mode refused. Discover first and choose an advertised default, plan or acceptEdits mode while idle.",
+						: "Discover Claude ACP first, then choose an offered mode while idle.",
 					"error",
 				);
 			}
@@ -118,38 +113,12 @@ export function registerClaudeAcp(pi: ExtensionAPI, profile: string, factory?: A
 	pi.on("session_start", async (_event, ctx) => {
 		session?.close();
 		session = undefined;
-		directPrompt = undefined;
 		binding = undefined;
-		context = ctx;
 		for (const entry of ctx.sessionManager.getBranch())
 			if (entry.type === "custom" && entry.customType === "poly-claude-acp-binding")
 				binding = entry.data as typeof binding;
 	});
-	pi.on("input", (event, ctx) => {
-		directPrompt = undefined;
-		if (ctx.model?.provider !== CLAUDE_ACP_PROVIDER) return { action: "continue" };
-		if (event.source !== "interactive" || !ctx.hasUI || ctx.mode !== "tui") {
-			ctx.ui.notify("Claude ACP accepts direct interactive user input only.", "error");
-			return { action: "handled" };
-		}
-		if (event.streamingBehavior || event.images?.length || event.text.startsWith("!")) {
-			ctx.ui.notify(
-				"Claude ACP accepts one direct text turn at a time. Wait for or cancel the current turn.",
-				"warning",
-			);
-			return { action: "handled" };
-		}
-		directPrompt = event.text;
-		context = ctx;
-		return { action: "continue" };
-	});
-	pi.on("agent_settled", () => {
-		directPrompt = undefined;
-	});
-	pi.on("model_select", () => {
-		directPrompt = undefined;
-	});
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", () => {
 		session?.close();
 	});
 }
