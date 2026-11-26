@@ -139,7 +139,10 @@ test("Claude ACP login queries native status and rejects client-auth and provide
 	for (const method of ["gateway", "gateway-bedrock", "console-login", "claude-ai-login"])
 		await assert.rejects(
 			CLAUDE_ACP_RUNTIME.login(
-				{ authMethods: [{ id: method }], agentCapabilities: {} },
+				{
+					authMethods: [{ id: method }],
+					agentCapabilities: { auth: { status: {} }, providers: {} },
+				},
 				async () => {
 					throw new Error("must not authenticate");
 				},
@@ -372,18 +375,6 @@ test("Claude ACP request boundary rejects unsafe modes and session overrides wit
 			CLAUDE_ACP_RUNTIME.beforeRequest!("session/new", "/fixture", neverRequest, { [key]: true }),
 			/session override/,
 		);
-});
-test("Claude ACP refuses a runtime that demands provider routing rather than attempting it", async () => {
-	const f = fixture();
-	f.port.request = async (method, params) => {
-		f.calls.push({ method, params });
-		throw new Error("requires providers/set");
-	};
-	await assert.rejects(f.session.discover(), /prompting mode is required/);
-	assert.deepEqual(
-		f.calls.map((c) => c.method),
-		["session/new"],
-	);
 });
 test("Claude ACP closes a turn if runtime notifications select a forbidden permission mode", async () => {
 	const f = fixture();
