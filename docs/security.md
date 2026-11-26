@@ -1,224 +1,61 @@
-# Security and subscription safeguards
-
-Assessment date: November 21, 2026. No Anthropic or Google account was authenticated, queried, or activated during implementation. Mock success does not establish live compatibility or permission.
-
-## Account protection
-
-For current v0.5 observations, see [qualification evidence](qualification.md#v05-provider-and-orchestration-evidence). Doctor is read-only; its capability report is not proof of valid authentication. `/poly-qualify` is an explicitly approved, one-generation tool-free worker request for eligible providers only. It cannot activate Claude/Google workers, change billing or silently continue after its budget. Offline self-development fixtures use no account credentials. The established provider, sandbox and integration trust rules below remain in force.
-
-The default policy locks Claude and Google. Their real runtime paths require explicit activation, the current review revision, an absolute executable path, and a matching SHA-256 digest. Google and Claude ACP discovery commands ask the user before starting their runtimes. While both integrations are locked, Pi startup initializes neither subscription runtime. No installer or CI job starts Claude Code, Claude ACP or Antigravity.
-
-Claude ACP is the default path and preserves native Claude Code tools, prompt and settings; the bridge is an explicit Pi-tool alternative. Both require user review and activation, which does not imply Anthropic approval. The native sign-in and third-party authentication conditions still require review for the intended use. See [Anthropic's legal and compliance documentation](https://code.claude.com/docs/en/legal-and-compliance).
-
-Google's published clarification supports direct interaction through compatible ACP editors and prohibits external coding-agent delegation through consumer credentials, even with human approval. This implementation follows that distinction. See the [November 16 clarification](https://discuss.ai.google.dev/t/tos-clarification-is-human-supervised-codex-to-antigravity-acp-delegation-permitted/200697) and [official ACP documentation](https://antigravity.google/docs/ide/extensions/acp/).
-
-Claude ACP activation defaults to `claude.mode: "acp"`; `bridge` must be selected explicitly. ACP activation leaves the bridge module unloaded. Claude requires review revision `2026-11-25.1`. An outdated Claude review locks both Claude modes. Google and native provider access remain available. Malformed enabled activation fields still reject the profile. Google's own stale review still rejects the profile. ACP preflight checks Linux native settings for authentication, routing and starting-mode conflicts before launch and requests. Native settings remain trusted application configuration; preflight is not a sandbox or an atomic defense against concurrent changes by trusted host code.
-
-Claude ACP requires a native `default` permission default. A new session must report that starting mode. Restoration accepts `default`, `plan` or `acceptEdits`, then selects `default`. Other resumed modes are refused with explicit replacement guidance. It allows only explicit advertised `default`, `plan` and `acceptEdits` selection. Session creation and restoration explicitly disable `allowDangerouslySkipPermissions`. No other session metadata is accepted. A pending turn preserves the forbidden-mode refusal when its port closes. The child alone receives the attested `CLAUDE_CODE_EXECUTABLE`; inherited runtime overrides and adapter logging controls are refused. The transport rechecks the executable before new sessions, restoration, prompts and login-status probes. A changed executable closes the port with a fixed review-required message. Disable background native updates with `env.DISABLE_AUTOUPDATER` set to `"1"`. See [native update controls](https://code.claude.com/docs/en/setup#disable-auto-updates). Checksum checks do not make concurrent file replacement atomic. No client authentication or provider-routing RPC is sent, and runtime-reported non-subscription authentication fails closed. Both Claude modes remain ineligible for workers, and automatic compaction handoffs are disabled for Claude ACP as for Google ACP.
-
-## Enforcement
-
-| Control                        | Implementation                                                                                                                                                                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No credential migration        | Bootstrap creates an isolated Pi profile without reading other auth stores.                                                                                                                                                                     |
-| Native provider authentication | Pi handles Codex and Kimi login. Claude Code and Google retain their own subscription credentials.                                                                                                                                              |
-| No implicit API billing        | Alternate providers are replaced with empty, non-authenticating definitions. Z.AI and Kimi coding keys require explicit policy choices.                                                                                                         |
-| Conflicting configuration      | Launch and stream checks reject provider overrides, API-key conflicts, proxy injection, and debug settings. Diagnostics report names only.                                                                                                      |
-| Google direct interaction      | Only a TUI input event with source `interactive` grants one Google stream request. RPC, extension input, and automatic continuations have no capability.                                                                                        |
-| Google permission mode         | Session initialization must offer `default`; the adapter selects it explicitly. No `yolo` fallback exists.                                                                                                                                      |
-| Tool approvals                 | Parent Pi tools require interactive confirmation. Scoped worker file tools require an approved task; sandbox test commands require separate confirmation. ACP shows contextual details, offers single-use options, and rejects opaque requests. |
-| Runtime provenance             | The adapter verifies the selected executable digest immediately before spawn. No updater or downloader exists in this repository.                                                                                                               |
-| Secrets in diagnostics         | ACP runtime stderr is discarded. ACP adapter failures and child-provider errors use fixed messages. Child results and memory reject known secret forms.                                                                                         |
-| Memory routing                 | Retrieval and handoff preparation do not call a provider. The user manually submits context from the editor.                                                                                                                                    |
-
-`--offline` disables startup network operations, not user-directed coding. Unmanaged built-in provider definitions have empty model lists and no OAuth flow. Trusted interactive Pi extensions, packages and commands can load normally. Project executable resources use Pi's native trust decision. Managed launch rejects unsafe `.pi/settings.json` overrides; it does not reject every project extension. See [profile validation](../src/profile.ts), [launcher](../scripts/cli.ts) and [native resources](pi-ecosystem.md).
-
-## Memory privacy
-
-MemPalace is optional and disabled initially. Discovery reads configuration paths and checks existing storage; it does not initialize a palace. Saves require a structured handoff, source references, verification flags, secret screening, and a user preview. Repeated unchanged checkpoints are skipped using a digest persisted in Pi's session. MemPalace's own checkpoint handles content deduplication.
-
-Each Git common directory maps to one project wing. Worktrees share that identity. Cross-project retrieval requires explicit `memory.sharedWings`. No personal knowledge-vault connector is configured, and the extension never writes to or indexes the Obsidian vault. Retrieved memories are labeled as untrusted historical evidence.
-
-Pattern screening cannot identify every confidential value or arbitrary secret. Do not put personal data, client secrets, or provider session data in a checkpoint. The preview remains necessary. MemPalace itself may have existing remote write routing or synchronization configured. Reusing that installation preserves those choices; review them before enabling memory. This project neither changes those settings nor claims that the palace is local-only.
-
-## Dependency and implementation assessment
-
-Pi, both Claude adapters, and their dependencies are installed with lifecycle scripts disabled by `.npmrc` and the documented `npm ci --ignore-scripts` command. The lockfile pins transitive versions and npm integrity hashes. Each Claude adapter pins its own Agent SDK dependency. The repository does not vendor dependency packages or native runtimes. Bootstrap does not install or update Claude Code or Antigravity.
-
-GPL-3.0-or-later applies to this project's original source code. It does not relicense the Claude Agent SDK or other dependencies. The SDK remains subject to [Anthropic's license](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/LICENSE.md) and applicable terms. Review the licenses and distribution terms of included dependencies before publishing a bundled package, container image, or executable. Source publication and subscription activation are separate decisions.
-
-The source review checked dependency manifests and installed runtime source. The bridge's strict MCP configuration, environment propagation, native-settings loading, SDK options, and debug controls informed the safeguards. The pinned Claude ACP adapter now shares the existing ACP client and approval UI; other reviewed ACP extensions remain uninstalled. See [the source inventory](architecture.md#reviewed-source-and-reuse-decisions).
-
-Automated tests cover request authorization, mock streaming and cancellation, initialization failures, permission denial, secret-safe diagnostics, native sessions, project-scoped checkpoints, and installation preservation. They isolate HOME and auth directories before imports. The bridge test replaces its SDK query seam; Claude ACP tests use mocked ports and a local protocol fixture, never either real Claude program.
-
-The initial npm advisory check identified a moderate development-tool chain through TypeScript ESLint and minimatch. The dependency was updated to `typescript-eslint@8.73.0`. Re-run `npm audit` when changing pins. The check is a snapshot, not a claim that dependencies are universally safe.
-
-The final advisory check reported zero advisories. The reviewed lifecycle inventory contains Google's no-op preinstall, esbuild's binary setup, protobufjs's compatibility warning, and optional macOS fsevents installation. All remained disabled during the clean lockfile installation. The Linux checks succeeded using the packaged optional esbuild binary.
-
-Initial v0.1 verification on Node 22.21.1 passed `npm ci --ignore-scripts`, `npm run check`, and two consecutive `npm run bootstrap` invocations after a real Pi TUI startup. The check ran type checking, ESLint with complexity limit 12, formatting verification, and 20 tests. The ACP subprocess fixture exercised the official SDK's JSON-RPC initialization, native-auth method selection, model discovery, prompting, and permission responses. The real Pi CLI loaded the extension offline, listed the locked models, displayed `/poly-status`, and exited without a provider prompt or login.
-
-Gitleaks 8.30.1 reported no candidates in a filesystem scan of this checkout using built-in rules. It did not validate credentials or inspect historical revisions. Scanner defaults and suppressions limit coverage. No existing function exceeded the configured complexity limit at handoff; no unrelated cleanup was applied.
-
-## Limits and activation blockers
-
-1. Neither Claude mode has live qualification or integration-specific Anthropic approval. Provider-side Extra Usage must also be reviewed. Disabling the bridge's long-context extra-usage option does not disable account-level overages.
-2. Google live compatibility, official runtime provenance, authentication, default-mode behavior, and model enumeration require an authorized interactive qualification. Install and review the official `agy` runtime before activation.
-3. Pi requires Node.js 22.19 or newer. `.nvmrc` pins the verified Node version. The launcher rejects older versions.
-4. The launcher rejects inherited API keys and other authentication overrides. Run `npm run validate` to identify conflicting variable names, then resolve them in the intended launch shell. Diagnostics never include their values.
-5. This profile is not an operating-system sandbox. Trusted extensions, arbitrary approved shell commands, or a person running an unmanaged Pi binary can bypass its application-level restrictions. It does not claim to police the user's entire workstation.
-6. Native provider model catalogs are pinned and can become stale. ACP model discovery requires explicit live activation. Quota and billing information are not inferred from mock responses.
-
-## v0.2 provider invocation and delegation
-
-The Claude stream wrapper now validates both `process.env` and `options.env` before upstream invocation. The same validator protects native provider streams and both ACP stream requests. Per-request overrides accept only locale, timezone, terminal, and color settings. Credential-supplied empty strings cannot remove a forbidden variable or change HOME, executable lookup, native storage, gateways, endpoints, or billing. Errors omit values. The bridge's `ccChildEnv` deliberately merges credential environments over the parent; validation therefore occurs before that merge, rather than trusting its propagation behavior.
-
-Delegation checks capabilities at UI selection, dispatch, child initialization, and every native request. Depth is exactly one. Claude subscription workers remain disabled even if direct Claude use is activated. Consumer Antigravity ACP workers remain forbidden even if Google activation is complete or a human approves a task. No child loads the Claude bridge or ACP runtime. A separate Gemini API provider is not configured.
-
-Built-in worker file tools pass checked absolute paths to Pi and block recognized sensitive path names and symlinks. Read additionally requires the exact checked target to be an existing regular file using `lstat`; a missing target fails before Pi can try lookalike filenames. Write and edit keep the checked absolute path. Worker tool batches use Pi's sequential execution mode, so a worker command settles before another file tool starts. This does not close filesystem races with unrelated host processes; descriptor-relative or isolated file operations need separate design. Known-pattern screening rejects some secrets, not every possible credential or confidential value. Provider authentication remains in the trusted controller. Restricted workers do not load arbitrary native executable extensions. Reviewed programmatic tools are application code and can exceed these built-in protections. See [file and sandbox tools](../src/orchestration/tools.ts), [secret screening](../src/secrets.ts) and [worker initialization](../src/orchestration/runner.ts).
-
-Approved test commands run in Bubblewrap with a separate network namespace, empty credential environment and temporary HOME. The mounts contain system runtimes, the task worktree and its read-only gitfile, but not the parent Git common directory or normal host authentication stores. Commands can read all mounted source, including any secrets already committed there. Do not delegate source containing credentials. A missing sandbox never selects a host shell. See [sandbox implementation](../src/orchestration/tools.ts) and [sandbox regressions](../tests/git-isolation.test.ts).
-
-Host Git pins each task to parent-derived metadata and verifies its top-level gitfile before registered task operations. Synchronous read-only view queries share a completed walk while worker tools execute sequentially. Every checked Git entry rejects an active preparation lifetime, from approval wait until command settlement, including workflow context and checkpoint reads. UI diff, cleanup, recovery, review and integration actions reuse that check and recheck after yielding approvals. Other commands invalidate the shared walk. No check is cached across views. Unrelated host processes can still race filesystem access. It walks the complete worktree without following symlinks, skipping only that top-level gitfile, and refuses nested repository metadata names, including case variants. No `node_modules` exemption exists; dependency copying also rejects `.git` entries. When refused, inspect and preserve the worktree manually. No automatic deletion or repository conversion occurs. Hooks and filesystem monitoring are disabled, submodule inspection is ignored, and unregistered paths under controller-registered task stores are refused. See [worktree guards](../src/orchestration/worktrees.ts), [dependency screening](../src/orchestration/preparation.ts) and [nested-repository tests](../tests/nested-repository.test.ts).
-
-Full patch content is secret-screened before a bounded view is returned. Raw status is checked against the filename index first. A typechange contributes two sections under one file budget; the pair is shown together or named as not shown. Unexpected names, status records or section counts refuse the view before it returns content. See [patch grouping](../src/orchestration/review-patches.ts). New diff artifacts hold bounded views and exact base/snapshot references; Git retains the full committed patch. The file index is also bounded. Packets and the tool page one ordered changed-file index, including names marked `[refused by path policy]`; those entries never return patches. Offsets address the same canonical pages in both surfaces. Required reviewer views use the available context-part slot, capped at 6000 characters after notice and separator reserves. Pagination reserves its actual rendered length. A draft that cannot hold its metadata and page refuses with the exact required size and configured budget before editing. Listed omitted files carry added/removed counts or an explicit unavailable-count label when Git reports binary, and additional files are counted with pagination and a full-index command. Inspection commands remain valid after cleanup because committed views use the shared Git directory. See [capture and view implementation](../src/orchestration/worktrees.ts) and [bounded views](../src/orchestration/review-view.ts).
-
-Rendering escapes controls, all Unicode format characters, line/paragraph separators, `Default_Ignorable_Code_Point`, U+3164, U+2800 and backslashes. U+2800 (Braille blank) is escaped because its blank appearance can conceal source differences even though Unicode does not classify it as default-ignorable. Newlines alone remain literal. BMP escapes use `\uXXXX`; supplementary code points use `\u{XXXXX}`. No byte selects a whole-file binary summary. File indexes use the same escaping. `review_diff` requires a checked literal file path for patch content. Git's changed-file result must be empty or contain only that exact allowed filename; directories are refused even when deleted or replaced. Filesystem failures during worker path checks use the fixed source-path refusal without filesystem details. Native file-tool filesystem errors carrying a `code`, `syscall` or `path` property use the same refusal. Other native file-tool errors retain Pi's message after rewriting checked absolute filenames to worktree-relative filenames and worktree-root forms to `.`. If a rewritten message still contains a worktree-root form or the HOME directory, the tool uses the fixed refusal instead. Abort and invalid-input messages are retained without host paths. An unreadable directory makes the nested-repository walk refuse with its fixed message before Git runs. Native filesystem errors during `review_diff` capture use the same refusal, while local policy and budget diagnostics are retained. Symlink path requests keep their existing refusal; aggregate Git views can show the link patch without opening its target. Every returned name is checked against the shared [source-path policy](../src/orchestration/path-policy.ts); refused index entries grant no patch access. Its special `"."` request returns the shared paginated index, without patch text. See [view selection](../src/orchestration/review-view.ts) and [tool enforcement](../src/orchestration/tools.ts).
-
-The [incremental scanner](../src/secrets.ts) retains 256 characters for fixed patterns, whose longest bounded branch needs 24 characters. Whitespace runs are normalized before screening. Unfinished private-key labels and credential-bearing URL forms retain their prefix and a 128-character suffix across chunks, so variable-length forms do not rely on a finite overlap alone. Private temporary directories use mode 0700 and patch spools use 0600. Normal success and handled failure remove spools; abrupt process termination can leave owner-only temporary output requiring local cleanup. Pattern screening still cannot identify every confidential value.
-
-The approved review packet is delivered byte for byte. Removing or duplicating its exact required view refuses dispatch; exceeding the effective context budget refuses dispatch with the size and excess. No approved context is silently truncated. Integration previews include the reviewer's approved packet and its visibility limits as well as the current diff and findings. These checks establish revision and packet association, not completeness or quality of review. See [task admission](../src/orchestration/tasks.ts), [packet assembly](../src/orchestration/context.ts) and [approval UI](../src/orchestration/extension.ts).
-
-Native stream wrappers force zero transport retries. Pi turn retries and automatic compaction stay disabled. Manual compaction requires a successful reviewed MemPalace checkpoint; Google compaction and overflow recovery that would retry a turn are rejected. Official native runtimes may have their own internal transport behavior, which this project does not intercept or rewrite. Safe pre-request transport retry classification remains deferred.
-
-ACP permissions display the tool title, operation kind, supplied arguments, locations, proposed content, risk description, and single-invocation scope. Missing operation details, excessive preview size, known sensitive content, cancellation, and unavailable UI deny the request. Only `allow_once` and `reject_once` can be selected. The adapter does not invent missing command arguments or claim knowledge the runtime did not supply.
-
-Documented ACP restoration is attempted only from the explicit discovery command and only with advertised `loadSession` support. A failure never silently creates a new session. Saved identifiers are local Pi recovery references, not credentials, and are never included in another provider's prompt or MemPalace handoff.
-
-Task results and briefs are screened before persistence. Worker native sessions still contain approved source context and model output, so they are private local artifacts under the ignored profile. Pattern screening does not prove arbitrary text is free of confidential information. Review every context packet before dispatch or memory persistence. No automatic extraction promotes an agent claim to a verified fact.
-
-## v0.2 verification evidence
-
-On Node 22.21.1, `npm ci --ignore-scripts --offline` succeeded. `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 41 offline tests, including actual Bubblewrap execution. Two bootstrap runs passed without overwriting the isolated profile. Validation rejected an inherited conflicting variable by name and passed in a temporary validation process without it. The original environment was preserved.
-
-The Codex-builder/Kimi-reviewer fixture uses real independent Pi SDK sessions and Git worktrees while replacing provider transports. It checks source editing, independent diff inspection, structured findings, parent preservation, and integration. A second integration fixture runs two actual Pi SDK sessions concurrently with independent provider identities and worktree contents. Command tests verify review and final approval requirements. Claude's negative environment regression was observed failing with its invocation check temporarily removed, then passing after restoration. The ACP permission regression also failed before its fix.
-
-A v0.2 offline TUI startup loaded the managed extension, displayed `/agents` and `/tasks`, and exited without a login or model prompt. `npm audit` reported zero advisories. Gitleaks 8.30.1 found no candidates in a temporary source candidate assembled from tracked and unignored repository files using built-in rules, without warnings or credential validation. Dependency directories, ignored local profiles, and historical Git revisions were outside that scan.
-
-## v0.3 recovery and preparation safeguards
-
-The project/profile host lease prevents a second managed process from marking a live host's tasks interrupted. Linux PID start identity protects against ordinary PID reuse. Foreign-machine, malformed, or interrupted-acquisition leases fail closed for manual inspection. This is local host coordination, not a distributed lock; unmanaged processes and manual Git operations remain outside it.
-
-Task creation intent is persisted before worktree creation. Record publication syncs the temporary file, renames it atomically, and syncs the containing directory. Partial temporary files do not replace complete records. Damaged records produce notices and remain on disk. Completed results are persisted before snapshot operations. Cleanup or missing worktree metadata does not discard task history. Unavailable workspaces remain listed with diagnostics and no Git execution inside them. A completed review association remains valid for integration after its own worktree cleanup when the builder snapshot is unchanged. See [record restoration](../src/orchestration/tasks.ts) and [cleanup recovery tests](../tests/cleanup-recovery.test.ts). Replacement workers require the normal reviewed packet, authorized provider/model, and interactive launch approval; original tasks, branches, and session references remain available. No restart automatically runs a prompt, tool, reviewer, or cherry-pick.
-
-Node preparation requires approval and a screened copy to an ignored, absent `node_modules` destination. It refuses sensitive filenames, known secret patterns, special files, external/absolute symlinks, oversized files, and excessive copy size. Staging prevents a failed copy from exposing a partial destination. There is no installer or network operation. Strict screening may reject ordinary package fixtures; users must inspect and prepare those manually. Pattern screening cannot prove that arbitrary dependency data is free of confidential content. Only copy dependencies you trust and are authorized to share with the task.
-
-Bubblewrap retains network/PID isolation, temporary HOME, system runtime mounts, and the task worktree. A missing runtime gives installation/namespace guidance; it never falls back to a host shell. Read-only roles receive no test, edit, or write tool. Preparation is a user-authorized controller operation, not a new model-facing shell. Test commands remain separately approved. Owned sandbox processes die with the parent; cancellation retains changes.
-
-Integration requires a completed read-only review task whose recorded revision matches the captured snapshot. The controller checks the builder snapshot, parent cleanliness, parent branch/base, detached HEAD, and unfinished Git operations after confirmation. Revision matching does not prove that the reviewer inspected every file or that its conclusions are correct. The optional implementation-review recipe also requires a different model; generic review tasks need not use a different model. See [integration checks](../src/orchestration/tasks.ts), [approval UI](../src/orchestration/extension.ts) and [recipe](../recipes/implementation-review.json). Integration intent is recorded before Git runs; interrupted state is reported without automatic conflict resolution or replay. Review findings remain evidence for the user's decision, not an automatic correctness certificate.
-
-Provider failures are reduced to fixed categories before entering child Pi history. Raw error strings, tokens, and request bodies are discarded. Qualification plans never resolve authentication or make a request. All native request guards and Claude/Google account restrictions remain in force.
-
-## v0.3 verification evidence
-
-The independent baseline check passed all 41 v0.2 tests, including the opt-in sandbox test. New regressions were observed failing against that baseline for concurrent host ownership and planner-as-reviewer admission, then passing with the fixes.
-
-On Node 22.21.1, a clean `npm ci --ignore-scripts --offline` succeeded. The final `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 57 tests with no skips. Three opt-in tests exercised real Bubblewrap isolation, host-death termination, and approved preparation execution. Disposable Git tests covered killed-host replacement, preserved source changes, stale review rejection, changed parent state, interrupted integration, missing worktrees, damaged records, and screened dependency copying. Pi command fixtures covered the guided Codex Builder → Kimi Reviewer flow, declined integration, and declined/approved replacement launches. Real independent Pi SDK sessions used mocked Codex, Kimi, and Z.AI transports; Z.AI failure fixtures retained categories and removed raw secret-bearing bodies before native session persistence.
-
-Two bootstrap runs preserved the profile. Validation rejected the inherited `ANTHROPIC_API_KEY` by name and passed in a temporary validation process without that variable; the original environment was unchanged. The offline qualification command printed 13 `not-run` scenarios. A real unauthenticated TUI loaded the extension, displayed `/tasks all`, and exited normally without login or a model prompt.
-
-`npm audit` reported zero current advisories. Installation warned that ESLint 9 is deprecated; its existing pin was preserved for a separate toolchain update. Gitleaks 8.30.1 reported no candidates or warnings in a temporary filesystem copy of tracked and unignored source, using built-in rules. Ignored profiles, dependencies, and Git history were excluded. No credentials were validated, and no live provider requests or MemPalace writes were performed.
-
-## v0.4 composition and trust
-
-Agent names no longer grant filesystem or execution rights. Admission intersects platform, configuration, agent, and task restrictions. The worker re-resolves effective permissions and selects only approved tool registrations. Built-in file tools keep their path and secret checks. Test capability requires write permission, interactive approval, and Bubblewrap. Workspace and sandbox configuration cannot select an unrestricted host path or shell.
-
-Permission restrictions survive named-agent removal and recreation by later recipes. Project configuration cannot install provider instances, executable integrations, JSON packages, shell commands, or disable the sandbox. Relative instruction paths reject traversal and symlinks. Exact model assignments and required capabilities are checked at task admission, in addition to UI selection. Workflow approval edits can change the brief and context, but cannot replace the approved identity or policy.
-
-The provider registry reserves native identifiers and adapters. Custom instances are explicitly activated local or API connections, with no OAuth registration, endpoint credentials, subscription endpoint aliases, inherited API-key fallback, or provider substitution. Every worker request uses the same environment, identity, endpoint, cancellation, and eligibility guards. Google and Claude worker restrictions remain non-overridable through these interfaces.
-
-The managed profile can explicitly trust executable integration modules by absolute path and SHA-256. These modules are application code, not untrusted configuration. Their custom tool implementations and transitive imports must be reviewed. Entry-module integrity does not attest the import graph or protect against malicious trusted code making its own requests. The supported contract does not hand provider credentials to tools; normal Pi provider authentication remains in the controller. No project JSON is imported as executable code.
-
-Workflow gates are mandatory execution callbacks. The Pi adapter uses context review and confirmation. Canceled or interrupted gates cannot later dispatch a task. Completed steps retain source-linked artifacts and model output remains a claim. Restart never replays tasks or gates. Git integration remains a separate UI-approved operation with exact-revision checks.
-
-The generic context registry filters project identity, screens secrets, bounds retrieval, and preserves record sources and certainty. It does not synchronize provider sessions or copy task state into MemPalace. An unavailable backend leaves task execution available. Known-pattern screening still cannot identify arbitrary confidential data.
-
-## v0.4 verification evidence
-
-On Node 22.21.1, `npm ci --ignore-scripts --offline` succeeded with the existing dependency pins. `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 79 tests with no failures or skips. The suite includes all prior provider/security fixtures, real Bubblewrap isolation and host-death checks, all four configuration recipes, arbitrary agents and artifacts, serialized approval gates, canceled gates, restart records, trusted integration checksums, and native/custom/MemPalace context adapters.
-
-The original Codex Builder → Kimi Reviewer Pi SDK scenario remains passing. A previously unknown registered mock adapter executes through a real Pi worker session. A fake loopback OpenAI-compatible server exercises Pi's real transport with no account credential. Recipe tests use disposable Git repositories and verify independent worktrees, revision-bound inspection, unchanged parents before integration, and resulting changes. These observations do not establish live provider qualification.
-
-The named-agent restriction regression was observed failing when restriction retention was temporarily removed, then passed with the fix restored. Omitted permissions default to read-only. Controller preparation commands also require effective read, write, and test permissions; confirmation cannot widen configuration policy. Runtime tests also reject model/capability mismatches and approval attempts to substitute provider identity. No error or restart triggers provider substitution, separately billed fallback, or automatic replay.
-
-Two bootstrap runs and profile validation passed. Validation explicitly removed an inherited conflicting Anthropic key from that child invocation only; no account configuration or persistent environment was changed. The real managed Pi TUI loaded, displayed `/agents` capabilities and locked Claude/Google status, and exited without a prompt or login. Native model-unavailable warnings reflect the unauthenticated profile. An existing tmux extended-key warning was left unchanged.
-
-`npm audit --json` reported zero advisories. Clean installation still warned about deprecated ESLint 9 and node-domexception; dependency upgrades remain separate work. Gitleaks 8.30.1 reported no candidates or warnings in a temporary filesystem copy of tracked and unignored source. Dependencies, ignored profiles, and Git history were excluded from that scan. No credential validation, live provider request, palace initialization, or real MemPalace write occurred.
-
-## Native Pi host and worker trust in v0.4.1
-
-The interactive process now accepts ordinary native resources. Previously suppressed user packages/extensions/MCP require explicit acknowledgment through `--trust-native-resources` or native install/config commands. That acknowledgment trusts enabled user code and its later changes. It is separate from Pi's own project trust store. Startup remains offline, installation is explicit, and project trust cannot silently become `always` through managed settings. [Native resources](pi-ecosystem.md) describes activation and limitations.
-
-A trusted parent extension has application authority. It can read files, spawn processes, access the host environment, replace providers, and change hooks. Pi Poly Agent cannot sandbox it or make central functions non-bypassable against malicious code already executing in the same process. Package installation and executable imports are trust decisions. Do not install code you would not run yourself. Native project trust prevents untrusted project extensions from silently executing; granting trust knowingly changes that authority.
-
-Restricted workers do not import those extensions. Native skill/prompt discovery is data-only, uses already installed package paths, and obeys saved project trust. Selected files reject symlinks and secrets. Supporting scripts are not executed or mounted. Skills cannot grant tools, filesystem access, providers, or approval bypasses. Scoped file tools and approved Bubblewrap tests remain the enforced paths for model-directed actions.
-
-Trusted custom tool implementations and provider factories remain application code too. Their metadata controls eligibility, not their arbitrary Node.js behavior. Review them before registration. The platform rejects unknown registrations, resource escalation, native subscription aliases, incompatible model metadata, and unsupported declared operations through its execution interfaces. It does not claim to contain malicious trusted implementations that deliberately avoid those interfaces.
-
-Claude and Google retain separate review revisions and activation locks. Google consumer ACP cannot be delegated to, including through skill text, custom instances, workflows, or context transfer. Claude subscription workers remain blocked. No authentication store is copied, no provider is automatically substituted, no API billing fallback is enabled, and no authenticated qualification runs during CI.
-
-## Executable integration integrity
-
-Executable `integrations.json` entries require a normalized absolute entry path, SHA-256 and `"trust": "application-code"`. Directory inventories are the default in v0.4.2. Existing complete `root`/`files` approvals with normalized entry paths remain valid. The user-owned managed profile is the only executable manifest source; project JSON cannot approve imports.
-
-Use a dedicated reviewed directory and list every file under it:
-
-```json
-{
-	"path": "/reviewed/integration/entry.mjs",
-	"sha256": "ENTRY_SHA256",
-	"trust": "application-code",
-	"root": "/reviewed/integration",
-	"files": {
-		"entry.mjs": "ENTRY_SHA256",
-		"helper.mjs": "HELPER_SHA256",
-		"package.json": "PACKAGE_SHA256",
-		"package-lock.json": "LOCK_SHA256"
-	}
-}
-```
-
-Replace each placeholder with its reviewed 64-character lowercase digest. The entry must appear in the inventory. Validation detects added, removed, changed, symlinked, or special files before import. Inventories allow at most 512 files and 32 nested directory levels. All approvals are validated before the first module executes, then each module is revalidated immediately before import. Digest reads refuse final-component symlinks and non-regular files. Changed approvals or failed initialization require restart to avoid stale module caches and repeated partial setup. Module paths reject non-normalized aliases. These checks reduce accidental substitution; they do not eliminate concurrent filesystem mutation. The source is [integration loading](../src/platform/integrations.ts).
-
-### Reapprove existing integrations
-
-For an old entry-only approval, review the entry and dependencies, create a `root`/`files` inventory and update the entry digest. The loader preserves the manifest and fails until this is done. If a directory inventory is impractical, explicitly set `"integrity": "entry-only-unverified-imports"` with no `root` or `files`. This narrower record acknowledges that imports and later dependency changes are not verified. `"trust": "application-code"` alone is no longer sufficient for entry-only loading.
-
-After a legitimate update, review the changed directory, refresh its exact file inventory and digests, and restart Pi. Run `npm run validate` before loading it. No reapproval command automatically hashes mutable code and calls it reviewed. Failed or changed modules cannot be repaired by hot reload. Task history, recipes, provider configuration and native resource trust markers need no migration.
-
-### What verification does not prove
-
-The inventory attests only the named directory. JavaScript can import built-ins, packages, absolute files, dynamic dependencies, or code outside it. Neither inventory validation nor a lockfile proves that the entire runtime import graph was reviewed or remains immutable. Use exact versions, review lockfile integrity and installation scripts, provision dependencies with scripts disabled where possible, keep reviewed code read-only, and explicitly trust remaining imports. npm records resolved package integrity in its [lockfile](https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json/); it does not attest arbitrary files used by executable code. The regression suite deliberately demonstrates that an import outside an inventoried directory remains application code rather than pretending to reject every dynamic dependency. Validation is not a cryptographic package manager, filesystem race defense, or execution sandbox.
-
-Native Pi packages keep their own installation and dependency behavior. The repository's application dependencies remain pinned in `package-lock.json`, with scripts disabled by its normal installation procedure. Native packages are separately installed trusted code; application lockfile integrity does not attest them.
-
-## v0.4.2 release verification
-
-The starting `main` revision was `345199f`. Installed Pi SDK and CLI both reported 1.5.2 on Node 22.21.1. Before implementation, `npm ci --ignore-scripts` and bootstrap passed. The first outer-sandbox test invocation failed five test files; the unchanged baseline passed all 100 tests after granting the subprocess and namespace access required by those fixtures. Validation rejected an inherited `ANTHROPIC_API_KEY` by name, then passed in a child omitting only that variable. No credential value was printed or copied.
-
-The final clean `npm ci --ignore-scripts --offline` installed 323 packages with scripts disabled. `PI_OFFLINE=1 PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint including complexity limit 12, formatting and all 123 tests with zero failures or skips. No changed function exceeds the complexity limit. The 23 added cases cover integrity/trust, native CLI and SDK compatibility, package contributions, worker resource restrictions and documentation/pin consistency. Two new regression tests failed against the original loader before passing with the fix.
-
-Two bootstrap runs and `npm run docs:check` passed. Codex, Kimi and Z.AI qualification commands each generated 13 `not-run` scenarios without authentication; Z.AI remained locked. Compatible-endpoint qualification remains covered by the existing offline plan fixture. The minimal/agent-team CI recipe command and actual Bubblewrap namespace probe also passed locally. The updated GitHub Actions workflow was parsed and its commands checked locally; its new hosted jobs have not run for this feature branch. Unsupported hosted namespaces produce an explicit warning and missing-coverage summary rather than a host-shell fallback.
-
-Every non-root lockfile entry matches v0.4.1. `npm audit --json` reported zero advisories at verification time. Existing ESLint 9 and node-domexception deprecation warnings remain; no dependency upgrade was bundled into this milestone. Gitleaks 8.30.1 reported no findings or warnings in an 83-file source snapshot, excluding ignored profiles, dependencies, Git metadata and history. No credential validation or revocation ran.
-
-No authenticated provider or MemPalace request ran. Live provider sessions, real network-installed Pi packages and full-screen terminal appearance remain unqualified. The [tested compatibility matrix](pi-ecosystem.md#compatibility-and-trust) distinguishes functional execution, data discovery and unverified behavior. See [v0.5 readiness](roadmap.md#v05-readiness) for remaining release limitations.
-
-## v0.4.1 verification evidence
-
-Against Pi SDK/CLI 1.5.2 on Node 22.21.1, `npm ci --ignore-scripts --offline` succeeded and `PI_POLY_SANDBOX_TEST=1 npm run check` passed type checking, ESLint with complexity limit 12, formatting, and all 100 tests with no skips. The 79 baseline tests remain, with 21 new ecosystem, custom-transport, and workflow-continuation tests. The SDK fixture consumes a native skill inside an independent worker. Native command collisions use Pi's disambiguated invocation names; native provider registration does not confer delegation eligibility.
-
-Recovery fixtures cover sequential and parallel checkpoints, approval gates, lost completion notifications, the dispatch/persistence crash gap, uncertain execution, changed provider policy, stale source, missing artifact contracts, completed Codex/Kimi implementation/inspection snapshots, and refusal to continue the same source run twice. A review-checkpoint regression failed before correcting validation to use the original parent base, then passed. Loopback transport fixtures cover streamed text, fragmented JSON tool arguments, HTTP 401/429/503, malformed SSE, cancellation, unavailable endpoints, metadata overrides, and separate instances. Native extension fixtures exercise untrusted project code, worker filesystem/process/credential/provider attempts, explicit user trust, and resource reload/filtering.
-
-Two bootstrap runs preserved the actual profile. Validation rejected an inherited `ANTHROPIC_API_KEY` by name, then passed in a child process omitting only that variable. The original environment and credential stores were untouched. The native `pi list` command succeeded, and qualification printed only `not-run` scenarios. No provider account, real model endpoint, or MemPalace server was contacted.
-
-The corrected lockfile changes only the application's version; every dependency entry matches v0.4. A current `npm audit` reported zero advisories. Installation still reports the existing ESLint 9 and node-domexception deprecation warnings. Gitleaks 8.30.1 found no candidates or warnings in a temporary snapshot of tracked and unignored source, excluding profiles, dependencies, and history. No credentials were validated or revoked. These checks do not establish live provider or third-party package qualification.
+# Security limits
+
+## Native runtime guards
+
+Claude and Gemini are off by default.
+`claude.enabled`, `claude.mode` and `google.enabled` control their activation and selection.
+Poly resolves the executable from `PATH` or the optional absolute path setting.
+It does not attest the executable or require a review revision.
+
+Login stays inside Claude Code or Antigravity.
+Poly does not read, copy or store their credential files.
+The ACP client advertises no terminal-auth capability.
+It does not call `authenticate` or `providers/*`.
+Claude authentication status comes from the adapter's native status operation.
+Gemini uses cached native login and reports the native login command when authentication is required.
+
+The [billing environment guards](providers.md#billing-environment-guards) apply only to the corresponding runtime.
+Native settings, helpers and account choices remain under your control.
+Poly does not verify account kind or subscription entitlement.
+It does not change providers or enable API billing after an error.
+
+Claude ACP keeps native tools, prompt and settings.
+It selects `default` before prompting.
+You may explicitly choose any mode the runtime offers, including modes that reduce native permission prompts.
+Permission requests that reach Poly show contextual details and offer only single-use decisions.
+Opaque requests are denied.
+The bridge uses Pi's tools; managed Pi tool calls require interactive approval.
+
+## Human input
+
+One shared input check covers both Claude modes and Gemini.
+It requires Pi's interactive input source and a terminal UI.
+ACP consumes that input for one prompt and does not forward the parent transcript.
+The bridge may continue Pi tool results within that human-initiated turn.
+Turn completion, model changes and session changes clear the authorization.
+Generated handoffs only populate the editor.
+Automatic compaction, retries and cache warming remain disabled in the managed profile.
+Manual compaction requires a confirmed MemPalace checkpoint and is unavailable for both Claude modes and Gemini.
+
+Trusted native Pi extensions execute with the host process's privileges.
+Poly does not sandbox that code.
+Native Pi owns project trust and resource loading.
+The isolated profile requires an explicit trust acknowledgment before loading installed executable resources through the managed launcher.
+Terminal automation outside Pi can look like interactive input; [Herdr helper selection](herdr.md) remains an operator responsibility.
+
+## Removed execution guarantees
+
+There are no Poly workers, worker tools, worktrees, task records or review gates in v0.6.
+There is no Bubblewrap execution path.
+Native runtimes and Pi tools act in the selected project with your user permissions.
+Herdr does not replace the removed sandbox or reviewed-integration gate.
+Old task files and Git worktrees are left on disk for manual inspection.
+
+## Context
+
+Pi owns conversation history.
+MemPalace is optional project knowledge storage.
+Reviewed handoffs preserve provenance and uncertainty.
+Known secret patterns are screened before checkpointing; this does not detect every confidential value.
+You review a handoff before saving it or submitting it to another model.
+Provider-private execution state is not a shared-memory artifact.
