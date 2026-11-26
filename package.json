@@ -10,9 +10,7 @@
 	"scripts": {
 		"pi": "node --import tsx scripts/cli.ts pi",
 		"doctor": "node --import tsx scripts/cli.ts doctor",
-		"dogfood:offline": "node --import ./tests/isolate.mjs --import tsx scripts/dogfood-offline.ts",
 		"bootstrap": "node --import tsx scripts/cli.ts bootstrap",
-		"qualify": "node --import tsx scripts/cli.ts qualify",
 		"validate": "node --import tsx scripts/cli.ts validate",
 		"start": "node --import tsx scripts/cli.ts launch",
 		"test": "node --import ./tests/isolate.mjs --import tsx --test tests/*.test.ts",
@@ -20,8 +18,7 @@
 		"lint": "eslint src scripts tests",
 		"docs:check": "node --import tsx scripts/check-docs.ts",
 		"format:check": "prettier --check .",
-		"check": "npm run typecheck && npm run lint && npm run format:check && npm test",
-		"recipe": "node --import tsx scripts/cli.ts recipe"
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test"
 	},
 	"dependencies": {
 		"@agentclientprotocol/claude-agent-acp": "0.112.0",
@@ -29,8 +26,7 @@
 		"@earendil-works/pi-ai": "1.5.2",
 		"@earendil-works/pi-coding-agent": "1.5.2",
 		"@modelcontextprotocol/sdk": "1.32.2",
-		"pi-claude-bridge": "0.13.0",
-		"typebox": "1.3.27"
+		"pi-claude-bridge": "0.13.0"
 	},
 	"devDependencies": {
 		"@types/node": "22.19.19",
