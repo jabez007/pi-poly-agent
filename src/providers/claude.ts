@@ -3,7 +3,12 @@ import { existsSync, writeFileSync } from "node:fs";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
-import { BRIDGE_PROVIDER, assertInvocationEnvironment, type Activation } from "../policy.ts";
+import {
+	BRIDGE_PROVIDER,
+	assertInvocationEnvironment,
+	conflictingEnvironment,
+	type Activation,
+} from "../policy.ts";
 import { runtimePath, readConfiguration, assertSafeProfile } from "../profile.ts";
 import { CLAUDE_LOGIN_MESSAGE } from "./claude-acp.ts";
 
@@ -14,24 +19,13 @@ export async function registerClaudeBridge(
 	check: () => void,
 ): Promise<void> {
 	// Loading the bridge registers native lifecycle hooks, so opt-in precedes its import.
-	if (!activation.enabled) {
-		pi.registerProvider(BRIDGE_PROVIDER, {
-			baseUrl: "locked://claude-sdk",
-			apiKey: "runtime-owned",
-			api: BRIDGE_PROVIDER,
-			models: builtinProviders()
-				.find((p) => p.id === "anthropic")!
-				.getModels()
-				.map((m) => ({ ...m, name: `${m.name} [off]` })),
-			streamSimple: () => {
-				check();
-				throw new Error("Claude bridge is off or unselected in poly.json");
-			},
-		});
+	const refusal = activation.enabled
+		? bridgeStartupRefusal(profile, activation)
+		: "Claude bridge is off or unselected in poly.json";
+	if (refusal) {
+		registerLockedBridge(pi, check, refusal);
 		return;
 	}
-	assertInvocationEnvironment(BRIDGE_PROVIDER);
-	prepareBridgeConfiguration(profile, activation);
 	const bridgePath: string = "pi-claude-bridge/src/index.ts";
 	const upstream = await import(bridgePath);
 	const facade = Object.create(pi) as ExtensionAPI;
@@ -42,6 +36,34 @@ export async function registerClaudeBridge(
 		});
 	}) as ExtensionAPI["registerProvider"];
 	upstream.default(facade);
+}
+
+function registerLockedBridge(pi: ExtensionAPI, check: () => void, refusal: string): void {
+	pi.registerProvider(BRIDGE_PROVIDER, {
+		baseUrl: "locked://claude-sdk",
+		apiKey: "runtime-owned",
+		api: BRIDGE_PROVIDER,
+		models: builtinProviders()
+			.find((p) => p.id === "anthropic")!
+			.getModels()
+			.map((m) => ({ ...m, name: `${m.name} [locked]` })),
+		streamSimple: () => {
+			check();
+			throw new Error(refusal);
+		},
+	});
+}
+
+function bridgeStartupRefusal(profile: string, activation: Activation): string | undefined {
+	try {
+		assertInvocationEnvironment(BRIDGE_PROVIDER);
+		prepareBridgeConfiguration(profile, activation);
+	} catch (error) {
+		const names = conflictingEnvironment(process.env, BRIDGE_PROVIDER);
+		return names.length
+			? `Claude bridge environment refused: ${names.join(", ")}; values withheld`
+			: (error as Error).message;
+	}
 }
 
 /** Upstream requires its executable path in this file; only billing choices remain user policy. */

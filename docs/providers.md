@@ -69,7 +69,9 @@ These statements do not establish Anthropic approval of either Pi integration.
 
 ## Billing environment guards
 
-Poly refuses the following nonempty variables only when starting or requesting the corresponding runtime.
+Poly checks the following nonempty variables when preparing or requesting the corresponding runtime.
+A bridge startup refusal locks only the bridge and leaves Poly's other providers and commands available.
+The locked bridge reports conflicting variable names or a missing executable without importing the bridge package.
 It checks both inherited and per-request environments.
 Diagnostics show names rather than values.
 
