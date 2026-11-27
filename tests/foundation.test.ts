@@ -89,10 +89,36 @@ test("both Claude modes and Gemini require opt-in and direct human input", () =>
 		assert.doesNotThrow(() => assertRequest(provider, defaultPolicy()));
 });
 
+const expectedClaudeBilling = [
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_CUSTOM_HEADERS",
+	"ANTHROPIC_PROFILE",
+	"ANTHROPIC_FEDERATION_RULE_ID",
+	"CLAUDE_CODE_USE_BEDROCK",
+	"CLAUDE_CODE_USE_VERTEX",
+	"CLAUDE_CODE_USE_FOUNDRY",
+	"CLAUDE_CODE_USE_MANTLE",
+	"CLAUDE_CODE_USE_ANTHROPIC_AWS",
+	"CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+] as const;
+const expectedGoogleBilling = [
+	"GEMINI_API_KEY",
+	"GOOGLE_API_KEY",
+	"GOOGLE_GEMINI_BASE_URL",
+	"AGY_ADC_AUTH",
+] as const;
+
+test("billing environment variable names stay pinned independently of implementation lists", () => {
+	assert.deepEqual(CLAUDE_BILLING_ENV, expectedClaudeBilling);
+	assert.deepEqual(GOOGLE_BILLING_ENV, expectedGoogleBilling);
+});
+
 for (const [provider, names] of [
-	[CLAUDE_ACP_PROVIDER, CLAUDE_BILLING_ENV],
-	[BRIDGE_PROVIDER, CLAUDE_BILLING_ENV],
-	[ACP_PROVIDER, GOOGLE_BILLING_ENV],
+	[CLAUDE_ACP_PROVIDER, expectedClaudeBilling],
+	[BRIDGE_PROVIDER, expectedClaudeBilling],
+	[ACP_PROVIDER, expectedGoogleBilling],
 ] as const) {
 	for (const name of names)
 		test(`${provider} refuses ${name} at inherited and request environments without values`, () => {
