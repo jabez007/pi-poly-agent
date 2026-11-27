@@ -34,11 +34,19 @@ The [quick start](https://herdr.dev/tui/docs/quick-start/) explains panes, detac
 Herdr's [integration guide](https://herdr.dev/tui/docs/integrations/) describes native Pi state reporting and supported restoration.
 Poly leaves those responsibilities with Herdr and Pi.
 
+Herdr [restores Pi with `pi --session <path-or-id>`](https://herdr.dev/tui/docs/session-state/#native-agent-session-restore), without Poly's `--project` flag.
+Pi loads resources from `PI_CODING_AGENT_DIR`, or `~/.pi/agent` when it is unset; the session reference does not select Poly's profile.
+If the restored pane lost the profile, stop Pi and restart it from the Poly checkout:
+
+```bash
+npm start -- --project /absolute/path/to/your/project --session /absolute/path/to/session.jsonl --trust-native-resources
+```
+
 ## Choose helper providers yourself
 
 Start Claude and Gemini panes yourself.
-Use only Codex, Kimi or Z.AI for helpers that agents start with `hc run`.
-Herdr Core documents helper execution, including `hc run --bg`, in [Agents run agents](https://herdr.dev/core/).
+Use only Codex, Kimi or Z.AI for helpers that agents start with [`herdr agent start`](https://herdr.dev/tui/docs/cli-reference/#agents) and drive with [`herdr agent prompt`](https://herdr.dev/tui/docs/cli-reference/#agents).
+`herdr agent prompt` types into a pane, so Poly cannot distinguish it from your typing in a Claude or Gemini pane.
 Pi Poly Agent cannot enforce provider selection inside Herdr or distinguish agent-sent terminal input from your keystrokes.
 
 Herdr's [terminal runtime](https://herdr.dev/core/) supports background terminals and several machines.
