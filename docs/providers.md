@@ -82,6 +82,9 @@ Diagnostics show names rather than values.
 | Gemini              | `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `AGY_ADC_AUTH`                                                                                                                          | [Antigravity authentication](https://antigravity.google/docs/install/)   |
 | Gemini              | `GOOGLE_API_KEY` is refused defensively; the current CLI documents that it ignores this variable                                                                                    | [Antigravity authentication](https://antigravity.google/docs/install/)   |
 
+During the v0.6.1 review, the [Claude environment reference](https://code.claude.com/docs/en/env-vars) did not document `CLAUDE_CODE_USE_GATEWAY` or `ANTHROPIC_UNIX_SOCKET`.
+Neither variable is included in this guard.
+
 Proxy variables, `NODE_OPTIONS`, `LD_*` and unrelated-provider variables are not refused by this guard.
 Native settings can also affect authentication and billing; Poly no longer preflights them.
 The login check does not attest an account's subscription plan.

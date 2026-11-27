@@ -2,7 +2,7 @@
 
 v0.6.0 removes Poly's workers, task scheduler, Git worktrees, review gates, agent definitions, workflow engine and recipes.
 The `qualify`, `dogfood:offline` and `recipe` npm scripts are removed.
-`/agents`, `/delegate`, `/tasks`, `/task`, `/review`, `/implement`, `/workflow` and `/workflow-runs` are no longer Poly commands.
+`/agents`, `/delegate`, `/tasks`, `/task`, `/review`, `/poly-qualify`, `/implement`, `/workflow` and `/workflow-runs` are no longer Poly commands.
 Use [Herdr](herdr.md) for terminal hosting and helpers.
 Use ordinary Git tools to inspect and integrate changes.
 There is no replacement automatic merge or review gate.

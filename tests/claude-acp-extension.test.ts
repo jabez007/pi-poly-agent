@@ -19,10 +19,6 @@ async function setup(t: TestContext) {
 	});
 	process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
 	mkdirSync(process.env.CLAUDE_CONFIG_DIR);
-	writeFileSync(
-		join(process.env.CLAUDE_CONFIG_DIR, "settings.json"),
-		JSON.stringify({ permissions: { defaultMode: "default" } }),
-	);
 	const profile = join(root, "profile");
 	bootstrap(profile);
 	const runtime = join(root, "never-execute");

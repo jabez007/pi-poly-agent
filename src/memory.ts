@@ -238,7 +238,8 @@ export async function connectMemPalace(): Promise<MemoryTransport> {
 			ANONYMIZED_TELEMETRY: "false",
 		},
 	});
-	const client = new Client({ name: "pi-poly-agent", version: "0.1.0" });
+	const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	const client = new Client({ name: "pi-poly-agent", version });
 	try {
 		await client.connect(transport, { timeout: 8000 });
 	} catch {

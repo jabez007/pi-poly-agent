@@ -107,7 +107,7 @@ export function officialAcpFactory(
 				"initialize",
 				{
 					protocolVersion: PROTOCOL_VERSION,
-					clientInfo: { name: "pi-poly-agent", version: "0.6.0" },
+					clientInfo: { name: "pi-poly-agent", version: "0.6.1" },
 					clientCapabilities: {},
 				},
 				{ cancellationSignal: AbortSignal.timeout(15000), stopWaitingOnCancel: true },
